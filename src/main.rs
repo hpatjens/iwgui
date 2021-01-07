@@ -12,6 +12,7 @@ enum MyId {
     Any,
     Button1,
     Button2,
+    RightButton(usize),
 }
 
 impl Default for MyId {
@@ -21,9 +22,9 @@ impl Default for MyId {
 }
 impl Id for MyId {}
 
-trait Id: Default + Sync + Send + Eq + Ord + Copy {}
+trait Id: Default + Sync + Send + Eq + Ord + Copy + Serialize {}
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize)]
 enum GuiId<I: Id> {
     Auto(usize),
     User(I),
@@ -45,9 +46,11 @@ fn main() {
             stack.header("The left side".to_owned());
             stack
                 .button()
+                .handle(MyId::Button1)
                 .finish();
             stack
                 .button()
+                .handle(MyId::Button2)
                 .text("Button 2".to_owned())
                 .finish();
             for i in 0..40 {
@@ -67,6 +70,7 @@ fn main() {
             for i in 0..10 {
                 stack
                     .button()
+                    .handle(MyId::RightButton(i))
                     .text(format!("Button {}", i))
                     .finish();
             }
@@ -121,7 +125,7 @@ impl<'gui, I: Id> Gui<I> {
             state.elements
                 .get(&root)
                 .expect("must be inserted")
-                .to_html(&*state)
+                .to_html(&root, &*state)
         })
     }
 }
@@ -302,19 +306,23 @@ impl<I: Id> Element<I> {
         }
     }
 
-    fn to_html(&self, state: &GuiState<I>) -> String {
+    fn to_html(&self, id: &GuiId<I>, state: &GuiState<I>) -> String {
         match self {
             Element::Indeterminate => "".to_owned(),
             Element::Header(text) => format!("<h1>{}</h1>", text),
             Element::Label(value) => format!("<div>{}</div>", value),
             Element::Button { text } => {
                 let text = text.clone().unwrap_or_else(|| "Button".to_owned());
-                format!("<button>{}</button>", text)
+                if let GuiId::User(user_id) = id {
+                    format!("<button onclick=\"send_event({})\">{}</button>", serde_json::to_string(&user_id).unwrap(), text)
+                } else {
+                    format!("<button>{}</button>", text)
+                }
             }
             Element::StackLayout { children } => {
                 let children = children
                     .iter()
-                    .map(|id| state.elements.get(id).expect("must be inserted").to_html(state))
+                    .map(|id| state.elements.get(id).expect("must be inserted").to_html(id, state))
                     .collect::<Vec<_>>()
                     .join("\n");
                 format!("<div>{}</div>", children)
@@ -323,11 +331,11 @@ impl<I: Id> Element<I> {
                 let left = state.elements
                     .get(left)
                     .expect("must be inserted")
-                    .to_html(state);
+                    .to_html(left, state);
                 let right = state.elements
                     .get(right)
                     .expect("must be inserted")
-                    .to_html(state);
+                    .to_html(right, state);
                 format!("<div class=\"row\"><div class=\"column\">{}</div><div class=\"column\">{}</div></div>", left, right)
             }
         }
@@ -345,6 +353,19 @@ struct Connection<I: Id> {
 }
 
 impl<I: Id> Connection<I> {
+    pub fn events(&self) -> Vec<I> {
+        let mut events: Vec<I> = Vec::new();
+        while let Ok(message) = self.websocket.read_message() {
+            match message {
+                Message::Text(text) => {
+                    events.push(serde_json::from_str(&text).expect("malformed event"));
+                }
+                _ => panic!("unexpected message"),
+            }
+        }
+        events
+    }
+
     pub fn show_gui(&mut self, gui: &Gui<I>) {
         if let Some(last_gui) = &self.last_gui {
             let last_state = last_gui.state.borrow();
@@ -415,33 +436,26 @@ impl<I: 'static + Id> Server<I> {
                         let connections3 = connections2.clone();
                         thread::spawn(move || {
                             info!("Websocket connection thread");
+                            stream.set_nonblocking(true).unwrap(); // TODO: unwrap
                             match tungstenite::server::accept(stream) {
                                 Ok(websocket) => {
                                     info!("Websocket connection accepted");
-                                    let mut websocket = websocket;
-                                    let msg = websocket.read_message().unwrap();
-                                    match msg {
-                                        tungstenite::Message::Text(text) => {
-                                            trace!("Received message:\n{}", text);
-                                            let connection = Connection {
-                                                websocket,
-                                                uuid: Uuid::new_v4(),
-                                                last_gui: None,
-                                            };
-                                            let mut connections = connections3.lock().unwrap(); // Error Handling
-                                            connections.push(connection);
-                                            let connections_array = connections
-                                                .iter()
-                                                .map(|c| c.uuid.to_string())
-                                                .collect::<Vec<String>>()
-                                                .join(", ");
-                                            debug!(
-                                                "Connections: {}",
-                                                format!("[{}]", connections_array)
-                                            );
-                                        }
-                                        _ => info!("Expected greeting message"),
-                                    }
+                                    let connection = Connection {
+                                        websocket,
+                                        uuid: Uuid::new_v4(),
+                                        last_gui: None,
+                                    };
+                                    let mut connections = connections3.lock().unwrap(); // Error Handling
+                                    connections.push(connection);
+                                    let connections_array = connections
+                                        .iter()
+                                        .map(|c| c.uuid.to_string())
+                                        .collect::<Vec<String>>()
+                                        .join(", ");
+                                    debug!(
+                                        "Connections: {}",
+                                        format!("[{}]", connections_array)
+                                    );
                                 }
                                 Err(err) => {
                                     error!("{}", err);
