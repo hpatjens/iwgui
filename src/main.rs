@@ -1,98 +1,66 @@
-use std::{
-    cell::RefCell,
-    collections::BTreeMap,
-    io::{Read, Write},
-    net::{TcpListener, TcpStream, ToSocketAddrs},
-    slice::IterMut,
-    sync::{Arc, Mutex, MutexGuard},
-    thread,
-    time::Duration,
-};
+use std::{cell::RefCell, collections::BTreeMap, io::{Read, Write}, marker::PhantomData, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread, time::Duration};
 
 use log::{debug, error, info, trace};
 use simple_logger::SimpleLogger;
 use tungstenite::{Message, WebSocket};
 use uuid::Uuid;
+use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum GuiId {
-    Auto(usize),
-    Static {
-        name: &'static str,
-        file: &'static str,
-        line: u32,
-        column: u32,
-    },
-    Dynamic {
-        name: &'static str,
-        index: usize,
-        file: &'static str,
-        line: u32,
-        column: u32,
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
+enum MyId {
+    Any,
+    Button1,
+    Button2,
+}
+
+impl Default for MyId {
+    fn default() -> Self {
+        MyId::Any
     }
 }
+impl Id for MyId {}
 
-macro_rules! static_id {
-    ($name:literal) => {
-        GuiId::Static {
-            name: $name,
-            file: file!(),
-            line: line!(),
-            column: column!(),
-        }
-    };
-}
-
-macro_rules! dynamic_id {
-    ($name:literal, $index:expr) => {
-        GuiId::Dynamic {
-            name: $name,
-            index: $index,
-            file: file!(),
-            line: line!(),
-            column: column!(),
-        }
-    };
-}
+trait Id: Default + Sync + Send + Eq + Ord + Copy {}
 
 fn main() {
     SimpleLogger::new().init().unwrap();
 
-    let mut server = Server::new("127.0.0.1:8080");
+    let mut server = Server::<MyId>::new("127.0.0.1:8080");
     let mut index = 0;
     loop {
         for connection in &mut server.connections() {
             let mut gui = Gui::new();
             let root = gui.root();
             let (left, right) = root.vertical_panels();
-            
+
             // Left
             let mut stack = left.stacklayout();
-            stack.header(static_id!("header1"), "The left side".to_owned());
+            stack.header("The left side".to_owned());
             stack
-                .button(static_id!("button1"))
+                .button()
                 .finish();
             stack
-                .button(static_id!("button2"))
+                .button()
                 .text("Button 2".to_owned())
                 .finish();
             for i in 0..40 {
-                stack.label(dynamic_id!("labeli", i), i ^ index);
+                stack.label(i ^ index);
             }
 
             // Right
             let mut stack = right.stacklayout();
-            stack.header(static_id!("header1"), "The right side".to_owned());
+            stack.header("The right side".to_owned());
             stack
-                .button(static_id!("button3"))
+                .button()
                 .finish();
             stack
-                .button(static_id!("button4"))
+                .button()
                 .text("Button 4".to_owned())
                 .finish();
             for i in 0..10 {
                 stack
-                    .button(dynamic_id!("buttoni", i))
+                    .button()
                     .text(format!("Button {}", i))
                     .finish();
             }
@@ -103,29 +71,26 @@ fn main() {
     }
 }
 
-struct GuiState {
-    next_id: usize,
-    root: Option<GuiId>,
-    elements: BTreeMap<GuiId, Element>,
+struct GuiState<I: Id> {
+    root: Option<I>,
+    elements: BTreeMap<I, Element<I>>,
 }
 
-impl GuiState {
-    fn fetch_id(&mut self) -> GuiId {
-        let result = GuiId::Auto(self.next_id);
-        self.next_id += 1;
+impl<I: Id> GuiState<I> {
+    fn fetch_id(&mut self) -> I {
+        let result = I::default();
         result
     }
 }
 
-struct Gui {
-    state: RefCell<GuiState>,
+struct Gui<I: Id> {
+    state: RefCell<GuiState<I>>,
 }
 
-impl<'gui> Gui {
+impl<'gui, I: Id> Gui<I> {
     fn new() -> Self {
         Self {
             state: RefCell::new(GuiState {
-                next_id: 0,
                 root: None,
                 elements: BTreeMap::new(),
             })
@@ -133,7 +98,7 @@ impl<'gui> Gui {
     }
 
     // TODO: Ensure that this works when called multiple times
-    fn root(&'gui mut self) -> Indeterminate<'gui> {
+    fn root(&'gui mut self) -> Indeterminate<'gui, I> {
         let mut state = self.state.borrow_mut();
         let id = state.fetch_id();
         state.elements.insert(id, Element::Indeterminate);
@@ -156,17 +121,17 @@ impl<'gui> Gui {
 // Indeterminate
 // ----------------------------------------------------------------------------
 
-struct Indeterminate<'gui> {
-    state: &'gui RefCell<GuiState>,
-    target_id: GuiId,
+struct Indeterminate<'gui, I: Id> {
+    state: &'gui RefCell<GuiState<I>>,
+    target_id: I,
 }
 
-impl<'gui> Indeterminate<'gui> {
-    fn new(state: &'gui RefCell<GuiState>, target_id: GuiId) -> Self {
+impl<'gui, I: Id> Indeterminate<'gui, I> {
+    fn new(state: &'gui RefCell<GuiState<I>>, target_id: I) -> Self {
         Self { state, target_id }
     }
 
-    fn stacklayout(self) -> StackLayout<'gui> {
+    fn stacklayout(self) -> StackLayout<'gui, I> {
         let mut state = self.state.borrow_mut();
         let element = Element::StackLayout {
             children: Vec::new(),
@@ -181,7 +146,7 @@ impl<'gui> Indeterminate<'gui> {
         }
     }
 
-    fn vertical_panels(self) -> (Indeterminate<'gui>, Indeterminate<'gui>) {
+    fn vertical_panels(self) -> (Indeterminate<'gui, I>, Indeterminate<'gui, I>) {
         let mut state = self.state.borrow_mut();
         let left = state.fetch_id();
         let right = state.fetch_id();
@@ -202,13 +167,13 @@ impl<'gui> Indeterminate<'gui> {
 // StackLayout
 // ----------------------------------------------------------------------------
 
-struct StackLayout<'gui> {
-    state: &'gui RefCell<GuiState>,
-    id: GuiId,
+struct StackLayout<'gui, I: Id> {
+    state: &'gui RefCell<GuiState<I>>,
+    id: I,
 }
 
-impl PushElement for StackLayout<'_> {
-    fn push_element(&mut self, id: GuiId, element: Element) {
+impl<I: Id> PushElement<I> for StackLayout<'_, I> {
+    fn push_element(&mut self, id: I, element: Element<I>) {
         let mut state = self.state.borrow_mut();
         state.elements.insert(id, element);
         let stacklayout = state
@@ -221,7 +186,7 @@ impl PushElement for StackLayout<'_> {
         }
     }
 
-    fn gui(&mut self) -> &RefCell<GuiState> {
+    fn gui(&mut self) -> &RefCell<GuiState<I>> {
         self.state
     }
 }
@@ -230,22 +195,23 @@ impl PushElement for StackLayout<'_> {
 // Columns
 // ----------------------------------------------------------------------------
 
-struct Columns<'gui> {
-    gui: &'gui mut Gui,
-    id: GuiId,
+struct Columns<'gui, I: Id> {
+    gui: &'gui mut Gui<I>,
+    id: I,
 }
 
 // ----------------------------------------------------------------------------
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
-struct ButtonBuilder<'parent, P: PushElement> {
+struct ButtonBuilder<'parent, I: Id, P: PushElement<I>> {
     parent: &'parent mut P,
-    id: GuiId,
+    id: I,
     text: Option<String>,
+    phantom: PhantomData<I>,
 }
 
-impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
+impl<'parent, I: Id, P: PushElement<I>> ButtonBuilder<'parent, I, P> {
     pub fn text(mut self, text: String) -> Self {
         self.text = Some(text);
         self
@@ -260,28 +226,29 @@ impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
 // traits
 // ----------------------------------------------------------------------------
 
-trait PushElement: Sized {
-    fn push_element(&mut self, id: GuiId, element: Element);
-    fn gui(&mut self) -> &RefCell<GuiState>;
+trait PushElement<I: Id>: Sized {
+    fn push_element(&mut self, id: I, element: Element<I>);
+    fn gui(&mut self) -> &RefCell<GuiState<I>>;
 
-    fn header(&mut self, id: GuiId, text: String) {
-        self.push_element(id, Element::Header(text))
+    fn header(&mut self, text: String) {
+        self.push_element(I::default(), Element::Header(text))
     }
 
-    fn label<T: ToString>(&mut self, id: GuiId, value: T) {
-        self.push_element(id, Element::Label(value.to_string()))
+    fn label<T: ToString>(&mut self,value: T) {
+        self.push_element(I::default(), Element::Label(value.to_string()))
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
-    fn button(&mut self, id: GuiId) -> ButtonBuilder<Self> {
+    fn button(&mut self) -> ButtonBuilder<I, Self> {
         ButtonBuilder {
             parent: self,
-            id,
+            id: I::default(),
             text: None,
+            phantom: PhantomData,
         }
     }
 
-    fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
+    fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui, I> {
         let id = self.gui().borrow_mut().fetch_id();
         self.push_element(id, Element::Indeterminate);
         Indeterminate::new(self.gui(), id)
@@ -293,33 +260,37 @@ trait PushElement: Sized {
 // ----------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
-enum Element {
+enum Element<I: Id> {
     Indeterminate,
     Header(String),
     Label(String),
     Button {
+        id: I,
         text: Option<String>,
     },
     StackLayout {
-        children: Vec<GuiId>, // OPTIMIZE: Get rid of heap allocation
+        children: Vec<I>, // OPTIMIZE: Get rid of heap allocation
     },
     Columns {
-        left: GuiId,
-        right: GuiId,
+        left: I,
+        right: I,
     },
 }
 
-impl Element {
-    fn new_button() -> Element {
-        Element::Button { text: None }
+impl<I: Id> Element<I> {
+    fn new_button() -> Element<I> {
+        Element::Button { 
+            id: I::default(),
+            text: None,
+        }
     }
 
-    fn to_html(&self, state: &GuiState) -> String {
+    fn to_html(&self, state: &GuiState<I>) -> String {
         match self {
             Element::Indeterminate => "".to_owned(),
             Element::Header(text) => format!("<h1>{}</h1>", text),
             Element::Label(value) => format!("<div>{}</div>", value),
-            Element::Button { text } => {
+            Element::Button { id, text } => {
                 let text = text.clone().unwrap_or_else(|| "Button".to_owned());
                 format!("<button>{}</button>", text)
             }
@@ -352,14 +323,14 @@ impl Element {
 //
 // ----------------------------------------------------------------------------
 
-struct Connection {
+struct Connection<I: Id> {
     uuid: Uuid,
     websocket: WebSocket<TcpStream>,
-    last_gui: Option<Gui>,
+    last_gui: Option<Gui<I>>,
 }
 
-impl Connection {
-    pub fn show_gui(&mut self, gui: &Gui) {
+impl<I: Id> Connection<I> {
+    pub fn show_gui(&mut self, gui: &Gui<I>) {
         if let Some(last_gui) = &self.last_gui {
             let last_state = last_gui.state.borrow();
             let new_state = gui.state.borrow();
@@ -387,23 +358,23 @@ impl Connection {
     }
 }
 
-struct Connections<'a> {
-    r: MutexGuard<'a, Vec<Connection>>,
+struct Connections<'a, I: Id> {
+    r: MutexGuard<'a, Vec<Connection<I>>>,
 }
 
-impl<'a, 'b: 'a> IntoIterator for &'a mut Connections<'b> {
-    type IntoIter = IterMut<'a, Connection>;
-    type Item = &'a mut Connection;
-    fn into_iter(self) -> IterMut<'a, Connection> {
+impl<'a, 'b: 'a, I: Id> IntoIterator for &'a mut Connections<'b, I> {
+    type IntoIter = IterMut<'a, Connection<I>>;
+    type Item = &'a mut Connection<I>;
+    fn into_iter(self) -> IterMut<'a, Connection<I>> {
         self.r.iter_mut()
     }
 }
 
-struct Server {
-    connections: Arc<Mutex<Vec<Connection>>>,
+struct Server<I: Id> {
+    connections: Arc<Mutex<Vec<Connection<I>>>>,
 }
 
-impl Server {
+impl<I: 'static + Id> Server<I> {
     // TODO: IP
     pub fn new<A: ToSocketAddrs + Send + 'static>(address: A) -> Self {
         let connections = Arc::new(Mutex::new(Vec::new()));
@@ -472,7 +443,7 @@ impl Server {
         Self { connections }
     }
 
-    pub fn connections<'a>(&mut self) -> Connections {
+    pub fn connections<'a>(&mut self) -> Connections<I> {
         let connections = self.connections.lock().unwrap(); // TODO: Error handling
         Connections { r: connections }
     }
