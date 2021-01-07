@@ -23,6 +23,12 @@ impl Id for MyId {}
 
 trait Id: Default + Sync + Send + Eq + Ord + Copy {}
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+enum GuiId<I: Id> {
+    Auto(usize),
+    User(I),
+}
+
 fn main() {
     SimpleLogger::new().init().unwrap();
 
@@ -72,13 +78,15 @@ fn main() {
 }
 
 struct GuiState<I: Id> {
-    root: Option<I>,
-    elements: BTreeMap<I, Element<I>>,
+    next_id: usize,
+    root: Option<GuiId<I>>,
+    elements: BTreeMap<GuiId<I>, Element<I>>,
 }
 
 impl<I: Id> GuiState<I> {
-    fn fetch_id(&mut self) -> I {
-        let result = I::default();
+    fn fetch_id(&mut self) -> GuiId<I> {
+        let result = GuiId::Auto(self.next_id);
+        self.next_id += 1;
         result
     }
 }
@@ -91,6 +99,7 @@ impl<'gui, I: Id> Gui<I> {
     fn new() -> Self {
         Self {
             state: RefCell::new(GuiState {
+                next_id: 0,
                 root: None,
                 elements: BTreeMap::new(),
             })
@@ -123,11 +132,11 @@ impl<'gui, I: Id> Gui<I> {
 
 struct Indeterminate<'gui, I: Id> {
     state: &'gui RefCell<GuiState<I>>,
-    target_id: I,
+    target_id: GuiId<I>,
 }
 
 impl<'gui, I: Id> Indeterminate<'gui, I> {
-    fn new(state: &'gui RefCell<GuiState<I>>, target_id: I) -> Self {
+    fn new(state: &'gui RefCell<GuiState<I>>, target_id: GuiId<I>) -> Self {
         Self { state, target_id }
     }
 
@@ -169,11 +178,11 @@ impl<'gui, I: Id> Indeterminate<'gui, I> {
 
 struct StackLayout<'gui, I: Id> {
     state: &'gui RefCell<GuiState<I>>,
-    id: I,
+    id: GuiId<I>,
 }
 
 impl<I: Id> PushElement<I> for StackLayout<'_, I> {
-    fn push_element(&mut self, id: I, element: Element<I>) {
+    fn push_element(&mut self, id: GuiId<I>, element: Element<I>) {
         let mut state = self.state.borrow_mut();
         state.elements.insert(id, element);
         let stacklayout = state
@@ -197,7 +206,7 @@ impl<I: Id> PushElement<I> for StackLayout<'_, I> {
 
 struct Columns<'gui, I: Id> {
     gui: &'gui mut Gui<I>,
-    id: I,
+    id: GuiId<I>,
 }
 
 // ----------------------------------------------------------------------------
@@ -206,7 +215,7 @@ struct Columns<'gui, I: Id> {
 
 struct ButtonBuilder<'parent, I: Id, P: PushElement<I>> {
     parent: &'parent mut P,
-    id: I,
+    id: Option<I>,
     text: Option<String>,
     phantom: PhantomData<I>,
 }
@@ -217,8 +226,16 @@ impl<'parent, I: Id, P: PushElement<I>> ButtonBuilder<'parent, I, P> {
         self
     }
 
+    pub fn handle(mut self, id: I) -> Self {
+        self.id = Some(id);
+        self
+    }
+
     pub fn finish(self) {
-        self.parent.push_element(self.id, Element::new_button());
+        let id = self.id
+            .map(|id| GuiId::User(id))
+            .unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
+        self.parent.push_element(id, Element::new_button(self.text));
     }
 }
 
@@ -227,22 +244,24 @@ impl<'parent, I: Id, P: PushElement<I>> ButtonBuilder<'parent, I, P> {
 // ----------------------------------------------------------------------------
 
 trait PushElement<I: Id>: Sized {
-    fn push_element(&mut self, id: I, element: Element<I>);
+    fn push_element(&mut self, id: GuiId<I>, element: Element<I>);
     fn gui(&mut self) -> &RefCell<GuiState<I>>;
 
     fn header(&mut self, text: String) {
-        self.push_element(I::default(), Element::Header(text))
+        let id = self.gui().borrow_mut().fetch_id();
+        self.push_element(id, Element::Header(text))
     }
 
     fn label<T: ToString>(&mut self,value: T) {
-        self.push_element(I::default(), Element::Label(value.to_string()))
+        let id = self.gui().borrow_mut().fetch_id();
+        self.push_element(id, Element::Label(value.to_string()))
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
     fn button(&mut self) -> ButtonBuilder<I, Self> {
         ButtonBuilder {
             parent: self,
-            id: I::default(),
+            id: None,
             text: None,
             phantom: PhantomData,
         }
@@ -265,23 +284,21 @@ enum Element<I: Id> {
     Header(String),
     Label(String),
     Button {
-        id: I,
         text: Option<String>,
     },
     StackLayout {
-        children: Vec<I>, // OPTIMIZE: Get rid of heap allocation
+        children: Vec<GuiId<I>>, // OPTIMIZE: Get rid of heap allocation
     },
     Columns {
-        left: I,
-        right: I,
+        left: GuiId<I>,
+        right: GuiId<I>,
     },
 }
 
 impl<I: Id> Element<I> {
-    fn new_button() -> Element<I> {
+    fn new_button(text: Option<String>) -> Element<I> {
         Element::Button { 
-            id: I::default(),
-            text: None,
+            text,
         }
     }
 
@@ -290,7 +307,7 @@ impl<I: Id> Element<I> {
             Element::Indeterminate => "".to_owned(),
             Element::Header(text) => format!("<h1>{}</h1>", text),
             Element::Label(value) => format!("<div>{}</div>", value),
-            Element::Button { id, text } => {
+            Element::Button { text } => {
                 let text = text.clone().unwrap_or_else(|| "Button".to_owned());
                 format!("<button>{}</button>", text)
             }
@@ -303,13 +320,11 @@ impl<I: Id> Element<I> {
                 format!("<div>{}</div>", children)
             }
             Element::Columns { left, right } => {
-                let left = state
-                    .elements
+                let left = state.elements
                     .get(left)
                     .expect("must be inserted")
                     .to_html(state);
-                let right = state
-                    .elements
+                let right = state.elements
                     .get(right)
                     .expect("must be inserted")
                     .to_html(state);
