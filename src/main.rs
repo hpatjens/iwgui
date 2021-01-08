@@ -7,7 +7,7 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 enum MyId {
     Any,
     Button1,
@@ -20,12 +20,15 @@ impl Default for MyId {
         MyId::Any
     }
 }
-impl Id for MyId {}
+impl<'id> Id<'id> for MyId {}
 
-trait Id: Default + Sync + Send + Eq + Ord + Copy + Serialize {}
+trait Id<'id>: Default + Sync + Send + Eq + Ord + Copy + Serialize + Deserialize<'id> {}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize)]
-enum GuiId<I: Id> {
+enum GuiId<I> 
+where 
+    for<'id> I: Id<'id>
+{
     Auto(usize),
     User(I),
 }
@@ -37,6 +40,12 @@ fn main() {
     let mut index = 0;
     loop {
         for connection in &mut server.connections() {
+            let events = connection.events();
+            dbg!(&events);
+            if !events.is_empty() {
+                panic!();
+            }
+
             let mut gui = Gui::new();
             let root = gui.root();
             let (left, right) = root.vertical_panels();
@@ -81,13 +90,19 @@ fn main() {
     }
 }
 
-struct GuiState<I: Id> {
+struct GuiState<I>
+where
+    for<'id> I: Id<'id>
+{
     next_id: usize,
     root: Option<GuiId<I>>,
     elements: BTreeMap<GuiId<I>, Element<I>>,
 }
 
-impl<I: Id> GuiState<I> {
+impl<I> GuiState<I>
+where
+    for<'id> I: Id<'id>
+{
     fn fetch_id(&mut self) -> GuiId<I> {
         let result = GuiId::Auto(self.next_id);
         self.next_id += 1;
@@ -95,11 +110,17 @@ impl<I: Id> GuiState<I> {
     }
 }
 
-struct Gui<I: Id> {
+struct Gui<I>
+where
+    for<'id> I: Id<'id>
+{
     state: RefCell<GuiState<I>>,
 }
 
-impl<'gui, I: Id> Gui<I> {
+impl<'gui, I> Gui<I>
+where 
+    for<'id> I: Id<'id>
+{
     fn new() -> Self {
         Self {
             state: RefCell::new(GuiState {
@@ -134,12 +155,18 @@ impl<'gui, I: Id> Gui<I> {
 // Indeterminate
 // ----------------------------------------------------------------------------
 
-struct Indeterminate<'gui, I: Id> {
+struct Indeterminate<'gui, I>
+where
+    for<'id> I: Id<'id>
+{
     state: &'gui RefCell<GuiState<I>>,
     target_id: GuiId<I>,
 }
 
-impl<'gui, I: Id> Indeterminate<'gui, I> {
+impl<'gui, I> Indeterminate<'gui, I>
+where 
+    for<'id> I: Id<'id>
+{
     fn new(state: &'gui RefCell<GuiState<I>>, target_id: GuiId<I>) -> Self {
         Self { state, target_id }
     }
@@ -180,12 +207,18 @@ impl<'gui, I: Id> Indeterminate<'gui, I> {
 // StackLayout
 // ----------------------------------------------------------------------------
 
-struct StackLayout<'gui, I: Id> {
+struct StackLayout<'gui, I>
+where
+    for<'id> I: Id<'id>
+{
     state: &'gui RefCell<GuiState<I>>,
     id: GuiId<I>,
 }
 
-impl<I: Id> PushElement<I> for StackLayout<'_, I> {
+impl<I> PushElement<I> for StackLayout<'_, I> 
+where
+    for<'id> I: Id<'id>
+{
     fn push_element(&mut self, id: GuiId<I>, element: Element<I>) {
         let mut state = self.state.borrow_mut();
         state.elements.insert(id, element);
@@ -208,7 +241,10 @@ impl<I: Id> PushElement<I> for StackLayout<'_, I> {
 // Columns
 // ----------------------------------------------------------------------------
 
-struct Columns<'gui, I: Id> {
+struct Columns<'gui, I>
+where
+    for<'id> I: Id<'id>
+{
     gui: &'gui mut Gui<I>,
     id: GuiId<I>,
 }
@@ -217,14 +253,20 @@ struct Columns<'gui, I: Id> {
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
-struct ButtonBuilder<'parent, I: Id, P: PushElement<I>> {
+struct ButtonBuilder<'parent, I, P: PushElement<I>>
+where 
+    for<'id> I: Id<'id>
+{
     parent: &'parent mut P,
     id: Option<I>,
     text: Option<String>,
     phantom: PhantomData<I>,
 }
 
-impl<'parent, I: Id, P: PushElement<I>> ButtonBuilder<'parent, I, P> {
+impl<'parent, I, P: PushElement<I>> ButtonBuilder<'parent, I, P>
+where 
+    for<'id> I: Id<'id>
+{
     pub fn text(mut self, text: String) -> Self {
         self.text = Some(text);
         self
@@ -247,7 +289,10 @@ impl<'parent, I: Id, P: PushElement<I>> ButtonBuilder<'parent, I, P> {
 // traits
 // ----------------------------------------------------------------------------
 
-trait PushElement<I: Id>: Sized {
+trait PushElement<I>: Sized
+where
+    for<'id> I: Id<'id>
+{
     fn push_element(&mut self, id: GuiId<I>, element: Element<I>);
     fn gui(&mut self) -> &RefCell<GuiState<I>>;
 
@@ -283,7 +328,10 @@ trait PushElement<I: Id>: Sized {
 // ----------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
-enum Element<I: Id> {
+enum Element<I>
+where 
+    for<'id> I: Id<'id>
+{
     Indeterminate,
     Header(String),
     Label(String),
@@ -299,7 +347,10 @@ enum Element<I: Id> {
     },
 }
 
-impl<I: Id> Element<I> {
+impl<I> Element<I>
+where 
+    for<'id> I: Id<'id>
+{
     fn new_button(text: Option<String>) -> Element<I> {
         Element::Button { 
             text,
@@ -314,7 +365,11 @@ impl<I: Id> Element<I> {
             Element::Button { text } => {
                 let text = text.clone().unwrap_or_else(|| "Button".to_owned());
                 if let GuiId::User(user_id) = id {
-                    format!("<button onclick=\"send_event({})\">{}</button>", serde_json::to_string(&user_id).unwrap(), text)
+                    // TODO: Use the event
+                    let event = serde_json::to_string(&user_id).unwrap().replace("\"", "'");
+
+
+                    format!("<button onclick=\"send_event()\">{}</button>", text)
                 } else {
                     format!("<button>{}</button>", text)
                 }
@@ -346,21 +401,38 @@ impl<I: Id> Element<I> {
 //
 // ----------------------------------------------------------------------------
 
-struct Connection<I: Id> {
+struct Connection<I>
+where
+    for<'id> I: Id<'id>
+{
     uuid: Uuid,
     websocket: WebSocket<TcpStream>,
     last_gui: Option<Gui<I>>,
 }
 
-impl<I: Id> Connection<I> {
-    pub fn events(&self) -> Vec<I> {
+impl<I> Connection<I> 
+where
+    for<'id> I: Id<'id>
+{
+    pub fn events(&mut self) -> Vec<I> {
         let mut events: Vec<I> = Vec::new();
-        while let Ok(message) = self.websocket.read_message() {
-            match message {
-                Message::Text(text) => {
-                    events.push(serde_json::from_str(&text).expect("malformed event"));
+        loop {
+            match self.websocket.read_message() {
+                Ok(message) => {
+                    match message {
+                        Message::Text(text) => {
+                            events.push(serde_json::from_str(&text).expect("malformed event"));
+                        }
+                        _ => {},
+                    }
+                    break;
                 }
-                _ => panic!("unexpected message"),
+                Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    break;
+                }
+                Err(err) => {
+                    panic!("Error while receiving an event: {}", err)
+                }
             }
         }
         events
@@ -394,11 +466,17 @@ impl<I: Id> Connection<I> {
     }
 }
 
-struct Connections<'a, I: Id> {
+struct Connections<'a, I> 
+where
+    for<'id> I: Id<'id>
+{
     r: MutexGuard<'a, Vec<Connection<I>>>,
 }
 
-impl<'a, 'b: 'a, I: Id> IntoIterator for &'a mut Connections<'b, I> {
+impl<'a, 'b: 'a, I> IntoIterator for &'a mut Connections<'b, I> 
+where
+    for<'id> I: Id<'id>
+{
     type IntoIter = IterMut<'a, Connection<I>>;
     type Item = &'a mut Connection<I>;
     fn into_iter(self) -> IterMut<'a, Connection<I>> {
@@ -406,11 +484,17 @@ impl<'a, 'b: 'a, I: Id> IntoIterator for &'a mut Connections<'b, I> {
     }
 }
 
-struct Server<I: Id> {
+struct Server<I> 
+where
+    for<'id> I: Id<'id>
+{
     connections: Arc<Mutex<Vec<Connection<I>>>>,
 }
 
-impl<I: 'static + Id> Server<I> {
+impl<I> Server<I> 
+where
+    for<'id> I: 'static + Id<'id>
+{
     // TODO: IP
     pub fn new<A: ToSocketAddrs + Send + 'static>(address: A) -> Self {
         let connections = Arc::new(Mutex::new(Vec::new()));

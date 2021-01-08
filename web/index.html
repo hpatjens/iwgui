@@ -16,7 +16,7 @@
         let socket = new WebSocket("ws://localhost:9001");
 
         socket.onopen = function(e) {
-            socket.send("Hello")
+            
         }
 
         socket.onmessage = function(event) {
@@ -36,8 +36,8 @@
             console.log(`[error] ${error.message}`)
         }
 
-        function send_event(event) {
-            socket.send(event)
+        function send_event() {
+            socket.send("Button1")
         }
     </script>
     <body>
