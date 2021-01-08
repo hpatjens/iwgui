@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::BTreeMap, fmt, io::{Read, Write}, marker::PhantomData, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread, time::Duration};
+use std::{cell::RefCell, collections::BTreeMap, fmt, io::{Read, Write}, marker::PhantomData, mem, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread, time::Duration};
 
 use log::{LevelFilter, debug, error, info, trace, warn};
 use simple_logger::SimpleLogger;
@@ -44,10 +44,9 @@ fn main() {
     loop {
         for connection in &mut server.connections() {
             let events = connection.events();
-            // if index > 0 && events.is_empty() {
-            //     index += 1;
-            //     continue;
-            // }
+            for event in events {
+                info!("{:?}", event);
+            }
 
             let mut gui = Gui::new();
             let root = gui.root();
@@ -372,7 +371,7 @@ where
                     let event = serde_json::to_string(&user_id).unwrap().replace("\"", "'");
 
 
-                    format!("<button onclick=\"send_event()\">{}</button>", text)
+                    format!("<button onclick=\"{{\"ButtonPressed\":{{\"Button1\"}}}}\">{}</button>", text)
                 } else {
                     format!("<button>{}</button>", text)
                 }
@@ -427,28 +426,9 @@ impl<I> Connection<I>
 where
     for<'id> I: Id<'id>
 {
-    pub fn events(&mut self) -> Vec<I> {
-        let mut events: Vec<I> = Vec::new();
-        // loop {
-        //     match self.websocket.read_message() {
-        //         Ok(message) => {
-        //             match message {
-        //                 Message::Text(text) => {
-        //                     events.push(serde_json::from_str(&text).expect("malformed event"));
-        //                 }
-        //                 _ => {},
-        //             }
-        //             break;
-        //         }
-        //         Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
-        //             break;
-        //         }
-        //         Err(err) => {
-        //             panic!("Error while receiving an event: {}", err)
-        //         }
-        //     }
-        // }
-        events
+    pub fn events(&mut self) -> Vec<Event<I>> {
+        let mut pending_events = self.pending_events.lock().unwrap(); // TODO: unwrap
+        mem::take(&mut *pending_events)
     }
 
     pub fn show_gui(&mut self, gui: &Gui<I>) {
@@ -603,8 +583,8 @@ where
     };
     match serde_json::from_str::<BrowserServerMessage<I>>(message) {
         Ok(BrowserServerMessage::Event(event)) => {
-            let mut pending_events = pending_events.lock().unwrap();
             info!("Received event: {:?}", event);
+            let mut pending_events = pending_events.lock().unwrap();
             pending_events.push(event);
         },
         Ok(BrowserServerMessage::Welcome { .. }) => {
