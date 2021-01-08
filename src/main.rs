@@ -416,25 +416,25 @@ where
 {
     pub fn events(&mut self) -> Vec<I> {
         let mut events: Vec<I> = Vec::new();
-        loop {
-            match self.websocket.read_message() {
-                Ok(message) => {
-                    match message {
-                        Message::Text(text) => {
-                            events.push(serde_json::from_str(&text).expect("malformed event"));
-                        }
-                        _ => {},
-                    }
-                    break;
-                }
-                Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                    break;
-                }
-                Err(err) => {
-                    panic!("Error while receiving an event: {}", err)
-                }
-            }
-        }
+        // loop {
+        //     match self.websocket.read_message() {
+        //         Ok(message) => {
+        //             match message {
+        //                 Message::Text(text) => {
+        //                     events.push(serde_json::from_str(&text).expect("malformed event"));
+        //                 }
+        //                 _ => {},
+        //             }
+        //             break;
+        //         }
+        //         Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
+        //             break;
+        //         }
+        //         Err(err) => {
+        //             panic!("Error while receiving an event: {}", err)
+        //         }
+        //     }
+        // }
         events
     }
 
@@ -484,6 +484,9 @@ where
     }
 }
 
+const WEBSOCKET_ADDRESS1: &'static str = "127.0.0.1:9001";
+const WEBSOCKET_ADDRESS2: &'static str = "127.0.0.1:9002";
+
 struct Server<I> 
 where
     for<'id> I: Id<'id>
@@ -498,7 +501,6 @@ where
     // TODO: IP
     pub fn new<A: ToSocketAddrs + Send + 'static>(address: A) -> Self {
         let connections = Arc::new(Mutex::new(Vec::new()));
-        let connections2 = connections.clone();
         thread::spawn(move || {
             let listener = TcpListener::bind(address).unwrap(); // TODO: Error handling
             for stream in listener.incoming() {
@@ -511,48 +513,7 @@ where
                 }
             }
         });
-        thread::spawn(move || {
-            let server = TcpListener::bind("127.0.0.1:9001").unwrap();
-            for stream in server.incoming() {
-                info!("Incoming websocket connection");
-                match stream {
-                    Ok(stream) => {
-                        let connections3 = connections2.clone();
-                        thread::spawn(move || {
-                            info!("Websocket connection thread");
-                            stream.set_nonblocking(true).unwrap(); // TODO: unwrap
-                            match tungstenite::server::accept(stream) {
-                                Ok(websocket) => {
-                                    info!("Websocket connection accepted");
-                                    let connection = Connection {
-                                        websocket,
-                                        uuid: Uuid::new_v4(),
-                                        last_gui: None,
-                                    };
-                                    let mut connections = connections3.lock().unwrap(); // Error Handling
-                                    connections.push(connection);
-                                    let connections_array = connections
-                                        .iter()
-                                        .map(|c| c.uuid.to_string())
-                                        .collect::<Vec<String>>()
-                                        .join(", ");
-                                    debug!(
-                                        "Connections: {}",
-                                        format!("[{}]", connections_array)
-                                    );
-                                }
-                                Err(err) => {
-                                    error!("{}", err);
-                                }
-                            }
-                        });
-                    }
-                    Err(err) => {
-                        error!("{}", err);
-                    }
-                }
-            }
-        });
+        spawn_incoming_thread(WEBSOCKET_ADDRESS1, connections.clone());
         Self { connections }
     }
 
@@ -560,6 +521,61 @@ where
         let connections = self.connections.lock().unwrap(); // TODO: Error handling
         Connections { r: connections }
     }
+
+}
+
+
+fn spawn_incoming_thread<I>(address: &'static str, connections: Arc<Mutex<Vec<Connection<I>>>>)
+where 
+    for<'id> I: 'static + Id<'id>
+{
+    thread::spawn(move || {
+        let server = TcpListener::bind(address).unwrap();
+        for stream in server.incoming() {
+            info!("Incoming websocket connection");
+            match stream {
+                Ok(stream) => {
+                    handle_incoming_websocket_connection(stream, connections.clone());
+                }
+                Err(err) => {
+                    error!("{}", err);
+                }
+            }
+        }
+    });
+}
+
+fn handle_incoming_websocket_connection<I>(stream: TcpStream, connections: Arc<Mutex<Vec<Connection<I>>>>)
+where 
+    for<'id> I: 'static + Id<'id>
+{
+    thread::spawn(move || {
+        info!("Started websocket connection thread");
+        match tungstenite::server::accept(stream) {
+            Ok(websocket) => {
+                info!("Websocket connection accepted");
+                let connection = Connection {
+                    websocket,
+                    uuid: Uuid::new_v4(),
+                    last_gui: None,
+                };
+                let mut connections = connections.lock().unwrap(); // Error Handling
+                connections.push(connection);
+                let connections_array = connections
+                    .iter()
+                    .map(|c| c.uuid.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                debug!(
+                    "Connections: {}",
+                    format!("[{}]", connections_array)
+                );
+            }
+            Err(err) => {
+                error!("{}", err);
+            }
+        }
+    });
 }
 
 fn handle_incoming_connection(mut stream: TcpStream) {
