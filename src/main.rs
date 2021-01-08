@@ -1,6 +1,6 @@
-use std::{cell::RefCell, collections::BTreeMap, io::{Read, Write}, marker::PhantomData, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread, time::Duration};
+use std::{cell::RefCell, collections::BTreeMap, fmt, io::{Read, Write}, marker::PhantomData, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread, time::Duration};
 
-use log::{debug, error, info, trace};
+use log::{LevelFilter, debug, error, info, trace, warn};
 use simple_logger::SimpleLogger;
 use tungstenite::{Message, WebSocket};
 use uuid::Uuid;
@@ -22,7 +22,7 @@ impl Default for MyId {
 }
 impl<'id> Id<'id> for MyId {}
 
-trait Id<'id>: Default + Sync + Send + Eq + Ord + Copy + Serialize + Deserialize<'id> {}
+pub trait Id<'id>: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy + Serialize + Deserialize<'id> {}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize)]
 enum GuiId<I> 
@@ -34,17 +34,20 @@ where
 }
 
 fn main() {
-    SimpleLogger::new().init().unwrap();
+    SimpleLogger::new()
+        .with_module_level("tungstenite", LevelFilter::Warn)
+        .init()
+        .unwrap();
 
     let mut server = Server::<MyId>::new("127.0.0.1:8080");
     let mut index = 0;
     loop {
         for connection in &mut server.connections() {
             let events = connection.events();
-            dbg!(&events);
-            if !events.is_empty() {
-                panic!();
-            }
+            // if index > 0 && events.is_empty() {
+            //     index += 1;
+            //     continue;
+            // }
 
             let mut gui = Gui::new();
             let root = gui.root();
@@ -401,13 +404,23 @@ where
 //
 // ----------------------------------------------------------------------------
 
+#[derive(Debug, Deserialize)]
+#[serde(bound = "for<'id> I: Id<'id>")]
+pub enum Event<I>
+where
+    for<'id> I: Id<'id>
+{
+    ButtonPressed(I),
+}
+
 struct Connection<I>
 where
     for<'id> I: Id<'id>
 {
     uuid: Uuid,
-    websocket: WebSocket<TcpStream>,
+    to_browser_websocket: Option<WebSocket<TcpStream>>, // This is assigned second
     last_gui: Option<Gui<I>>,
+    pending_events: Arc<Mutex<Vec<Event<I>>>>,
 }
 
 impl<I> Connection<I> 
@@ -460,7 +473,14 @@ where
             }
         } else {
             if let Some(html) = gui.to_html() {
-                self.websocket.write_message(Message::Text(html)).unwrap(); // TODO: Error handling
+                if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
+                    to_browser_websocket
+                        .write_message(Message::Text(html))
+                        .unwrap(); // TODO: Error handling
+                } else {
+                    // TODO: Error handling
+                    warn!("no to_browser_websocket found");
+                }
             }
         }
     }
@@ -484,8 +504,7 @@ where
     }
 }
 
-const WEBSOCKET_ADDRESS1: &'static str = "127.0.0.1:9001";
-const WEBSOCKET_ADDRESS2: &'static str = "127.0.0.1:9002";
+const WEBSOCKET_ADDRESS: &'static str = "127.0.0.1:9001";
 
 struct Server<I> 
 where
@@ -513,7 +532,7 @@ where
                 }
             }
         });
-        spawn_incoming_thread(WEBSOCKET_ADDRESS1, connections.clone());
+        spawn_incoming_thread(WEBSOCKET_ADDRESS, connections.clone());
         Self { connections }
     }
 
@@ -521,9 +540,7 @@ where
         let connections = self.connections.lock().unwrap(); // TODO: Error handling
         Connections { r: connections }
     }
-
 }
-
 
 fn spawn_incoming_thread<I>(address: &'static str, connections: Arc<Mutex<Vec<Connection<I>>>>)
 where 
@@ -545,6 +562,106 @@ where
     });
 }
 
+#[derive(Clone, Copy, Deserialize)]
+enum WebsocketDirection {
+    ToBrowser,
+    ToServer,
+}
+
+#[derive(Deserialize)]
+#[serde(bound = "for<'id> I: Id<'id>")]
+enum BrowserServerMessage<I>
+where
+    for<'id> I: Id<'id>
+{
+    Welcome {
+        direction: WebsocketDirection,
+        uuid: String,
+    },
+    Event(Event<I>),
+}
+
+fn handle_incoming_event<I>(
+    message: &str,
+    connections: Arc<Mutex<Vec<Connection<I>>>>, 
+    uuid: Uuid,
+)
+where 
+    for<'id> I: 'static + Id<'id>
+{
+    let pending_events = {
+        let connections = connections.lock().unwrap(); // TODO: unwrap
+        let connection = connections
+            .iter()
+            .find(|c| c.uuid == uuid);
+        if let Some(connection) = connection {
+            connection.pending_events.clone()
+        } else {
+            warn!("Event from browser but to connection found for {}", uuid);
+            return;
+        }
+    };
+    match serde_json::from_str::<BrowserServerMessage<I>>(message) {
+        Ok(BrowserServerMessage::Event(event)) => {
+            let mut pending_events = pending_events.lock().unwrap();
+            info!("Received event: {:?}", event);
+            pending_events.push(event);
+        },
+        Ok(BrowserServerMessage::Welcome { .. }) => {
+            todo!() // TODO: Error handling
+        }
+        Err(err) => {
+            warn!("Could not deserialize event \"{}\": {}", message, err);
+        }
+    }
+}
+
+fn handle_welcome_message<I>(
+    websocket: WebSocket<TcpStream>,
+    connections: Arc<Mutex<Vec<Connection<I>>>>, 
+    direction: WebsocketDirection, 
+    uuid: &str,
+)
+where 
+    for<'id> I: 'static + Id<'id>
+{
+    info!("Received welcome message from {}", uuid);
+    if let Ok(uuid) = Uuid::parse_str(uuid) {
+        match direction {
+            WebsocketDirection::ToBrowser => {
+                let connection = Connection {
+                    to_browser_websocket: Some(websocket),
+                    uuid,
+                    last_gui: None,
+                    pending_events: Arc::new(Mutex::new(Vec::new())),
+                };
+                let mut connections = connections.lock().unwrap(); // TODO: unwrap
+                connections.push(connection);
+                let connections_array = connections
+                    .iter()
+                    .map(|c| c.uuid.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                debug!("Connections: {}", format!("[{}]", connections_array));
+            }
+            WebsocketDirection::ToServer => {
+                let mut websocket = websocket;
+                loop {
+                    match websocket.read_message() {
+                        Ok(Message::Text(message)) => handle_incoming_event(&message, connections.clone(), uuid),
+                        Ok(unexpected_message) => warn!("Unexpected message: {:?}", unexpected_message),
+                        Err(err) => {
+                            panic!(err);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        panic!("Could not parse uuid message in 'welcome' message: {}", uuid);
+    }
+}
+
 fn handle_incoming_websocket_connection<I>(stream: TcpStream, connections: Arc<Mutex<Vec<Connection<I>>>>)
 where 
     for<'id> I: 'static + Id<'id>
@@ -552,24 +669,24 @@ where
     thread::spawn(move || {
         info!("Started websocket connection thread");
         match tungstenite::server::accept(stream) {
-            Ok(websocket) => {
-                info!("Websocket connection accepted");
-                let connection = Connection {
-                    websocket,
-                    uuid: Uuid::new_v4(),
-                    last_gui: None,
-                };
-                let mut connections = connections.lock().unwrap(); // Error Handling
-                connections.push(connection);
-                let connections_array = connections
-                    .iter()
-                    .map(|c| c.uuid.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                debug!(
-                    "Connections: {}",
-                    format!("[{}]", connections_array)
-                );
+            Ok(mut websocket) => {
+                match websocket.read_message() {
+                    Ok(Message::Text(text)) => {
+                        match serde_json::from_str::<BrowserServerMessage<I>>(&text) {
+                            Ok(BrowserServerMessage::Welcome { direction, uuid }) => {
+                                handle_welcome_message(websocket, connections, direction, &uuid);
+                            }
+                            Ok(_other) => {
+                                todo!()
+                            }
+                            Err(err) => {
+                                panic!(err);
+                            }
+                        }
+                    }
+                    Ok(..) => warn!("Unknown message type from websocket"),
+                    Err(err) => panic!(err),
+                }
             }
             Err(err) => {
                 error!("{}", err);
@@ -591,7 +708,8 @@ fn handle_incoming_connection(mut stream: TcpStream) {
             Ok(0) => info!("Zero bytes were read from the stream."),
             Ok(_bytes_read) => {
                 info!("Read bytes on connection {}", address);
-                let contents = include_str!("../web/index.html");
+                let uuid_string = format!("\"{}\"", Uuid::new_v4().to_string());
+                let contents = include_str!("../web/index.html").replace("#uuid", &uuid_string);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
                     contents.len(),

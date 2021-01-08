@@ -13,31 +13,65 @@
         }
     </style>
     <script>
-        let socket = new WebSocket("ws://localhost:9001");
+        let to_browser_socket = new WebSocket("ws://localhost:9001")
+        let to_server_socket = new WebSocket("ws://localhost:9001")
+        let uuid = #uuid
 
-        socket.onopen = function(e) {
-            
+        to_browser_socket.onopen = function(e) {
+            // Send the welcome message to the server to register this websocket as the one responsible for the server-browser connection
+            to_browser_socket.send(JSON.stringify({
+                "Welcome":{
+                    "direction":"ToBrowser",
+                    "uuid":uuid
+                }
+            }))
         }
-
-        socket.onmessage = function(event) {
+        to_browser_socket.onmessage = function(event) {
             console.log(`[message] Data received from server: ${event.data}`)
             document.body.innerHTML = event.data
         }
-
-        socket.onclose = function(event) {
+        to_browser_socket.onclose = function(event) {
             if (event.wasClean) {
                 console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`)
             } else {
                 console.log('[close] Connection died')
             }
         }
-
-        socket.onerror = function(error) {
+        to_browser_socket.onerror = function(error) {
             console.log(`[error] ${error.message}`)
         }
 
+
+        
+        to_server_socket.onopen = function(e) {
+            // Send the welcome message to the server to register this websocket as the one responsible for the browser-server connection
+            to_server_socket.send(JSON.stringify({
+                "Welcome":{
+                    "direction":"ToServer",
+                    "uuid":uuid
+                }
+            }))
+        }
+        to_server_socket.onmessage = function(event) {
+            console.log("[Error] onmessage called on to_server_socket")
+        }
+        to_server_socket.onclose = function(event) {
+            if (event.wasClean) {
+                console.log(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`)
+            } else {
+                console.log('[close] Connection died')
+            }
+        }
+        to_server_socket.onerror = function(error) {
+            console.log(`[error] ${error.message}`)
+        }
+
+
+        
+
+
         function send_event() {
-            socket.send("Button1")
+            to_server_socket.send("Button1")
         }
     </script>
     <body>
