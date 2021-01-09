@@ -85,7 +85,7 @@ fn main() {
                     .text(format!("Button {}", i))
                     .finish();
             }
-            connection.show_gui(&gui);
+            connection.show_gui(gui);
             index += 1;
         }
         thread::sleep(Duration::from_millis(50));
@@ -112,6 +112,15 @@ where
     }
 }
 
+struct GuiDiff<I>
+where
+    for<'id> I: Id<'id>
+{
+    only_lhs: Vec<GuiId<I>>,
+    only_rhs: Vec<GuiId<I>>,
+    unequal: Vec<GuiId<I>>,
+}
+
 struct Gui<I>
 where
     for<'id> I: Id<'id>
@@ -131,6 +140,28 @@ where
                 elements: BTreeMap::new(),
             })
         }
+    }
+
+    fn diff(lhs: &Gui<I>, rhs: &Gui<I>) -> GuiDiff<I> {
+        let lhs_state = lhs.state.borrow();
+        let rhs_state = rhs.state.borrow();
+        let mut only_lhs = Vec::new();
+        let mut only_rhs = Vec::new();
+        let mut unequal = Vec::new();
+        for (lhs_id, lhs_element) in &lhs_state.elements {
+            match rhs_state.elements.get(lhs_id) {
+                None => only_lhs.push(*lhs_id),
+                Some(rhs_element) if rhs_element != lhs_element => unequal.push(*lhs_id),
+                Some(_) => {},
+            }
+        }
+        for rhs_id in rhs_state.elements.keys() {
+            match lhs_state.elements.get(rhs_id) {
+                None => only_rhs.push(*rhs_id),
+                Some(_) => {},
+            }
+        }
+        GuiDiff { only_lhs, only_rhs, unequal }
     }
 
     // TODO: Ensure that this works when called multiple times
@@ -431,26 +462,12 @@ where
         mem::take(&mut *pending_events)
     }
 
-    pub fn show_gui(&mut self, gui: &Gui<I>) {
-        if let Some(last_gui) = &self.last_gui {
-            let last_state = last_gui.state.borrow();
-            let new_state = gui.state.borrow();
-            let mut added = Vec::new();
-            let mut removed = Vec::new();
-            let mut updated = Vec::new();
-            for (old_id, old_element) in &last_state.elements {
-                match new_state.elements.get(old_id) {
-                    None => removed.push(old_id),
-                    Some(new) if new != old_element => updated.push(old_element),
-                    Some(_) => (),
-                }
+    pub fn show_gui(&mut self, gui: Gui<I>) {
+        if let Some(last_gui) = &mut self.last_gui {
+            {
+
             }
-            for (new_id, new_element) in &new_state.elements {
-                match last_state.elements.get(new_id) {
-                    None => added.push(new_element),
-                    Some(_) => (), // case handed above
-                }
-            }
+            *last_gui = gui;
         } else {
             if let Some(html) = gui.to_html() {
                 if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
