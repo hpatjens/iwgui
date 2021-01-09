@@ -27,9 +27,13 @@
             }))
         }
         to_browser_socket.onmessage = function(event) {
-            console.log(`[message] Data received from server: ${event.data}`)
+            //console.log(`[message] Data received from server: ${event.data}`)
             //document.body.innerHTML = event.data
 
+            var server_browser_update = JSON.parse(event.data)
+            for (const added in server_browser_update.added) {
+                console.log(`${added} -> ${JSON.stringify(server_browser_update.added[added])}`)
+            }
 
 
         }
