@@ -28,7 +28,10 @@
         }
         to_browser_socket.onmessage = function(event) {
             console.log(`[message] Data received from server: ${event.data}`)
-            document.body.innerHTML = event.data
+            //document.body.innerHTML = event.data
+
+
+
         }
         to_browser_socket.onclose = function(event) {
             if (event.wasClean) {
@@ -67,11 +70,13 @@
         }
 
 
-        
 
 
-        function send_event() {
-            to_server_socket.send("Button1")
+
+        function send_event(event) {
+            var event = JSON.stringify(event)
+            to_server_socket.send(event)
+            console.log("Sent event: " + event)
         }
     </script>
     <body>

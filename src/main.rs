@@ -6,7 +6,6 @@ use tungstenite::{Message, WebSocket};
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 enum MyId {
     Any,
@@ -112,6 +111,7 @@ where
     }
 }
 
+#[derive(Debug)]
 struct GuiDiff<I>
 where
     for<'id> I: Id<'id>
@@ -151,7 +151,7 @@ where
         for (lhs_id, lhs_element) in &lhs_state.elements {
             match rhs_state.elements.get(lhs_id) {
                 None => only_lhs.push(*lhs_id),
-                Some(rhs_element) if rhs_element != lhs_element => unequal.push(*lhs_id),
+                Some(rhs_element) if dbg!(rhs_element != lhs_element) => unequal.push(*lhs_id),
                 Some(_) => {},
             }
         }
@@ -360,7 +360,7 @@ where
 // Element
 // ----------------------------------------------------------------------------
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Clone)]
 enum Element<I>
 where 
     for<'id> I: Id<'id>
@@ -399,10 +399,11 @@ where
                 let text = text.clone().unwrap_or_else(|| "Button".to_owned());
                 if let GuiId::User(user_id) = id {
                     // TODO: Use the event
-                    let event = serde_json::to_string(&user_id).unwrap().replace("\"", "'");
+
+                    let event = serde_json::to_string(&user_id).unwrap();
 
 
-                    format!("<button onclick=\"{{\"ButtonPressed\":{{\"Button1\"}}}}\">{}</button>", text)
+                    format!("<button onclick=\'to_server_socket.send({})\'>{}</button>", event, text)
                 } else {
                     format!("<button>{}</button>", text)
                 }
@@ -443,6 +444,16 @@ where
     ButtonPressed(I),
 }
 
+#[derive(Serialize)]
+struct ServerBrowserUpdate<I>
+where 
+    for<'id> I: Id<'id>
+{
+    added: BTreeMap<String, Element<I>>, // key must be String for serde_json
+    removed: Vec<GuiId<I>>,
+    updated: BTreeMap<String, Element<I>>, // key must be String for serde_json
+}
+
 struct Connection<I>
 where
     for<'id> I: Id<'id>
@@ -463,23 +474,77 @@ where
     }
 
     pub fn show_gui(&mut self, gui: Gui<I>) {
-        if let Some(last_gui) = &mut self.last_gui {
-            {
+        let server_browser_update = if let Some(last_gui) = &mut self.last_gui {
+            let diff = Gui::diff(last_gui, &gui);
+            dbg!(&diff);
+            // TODO: Code duplication
+            let added = diff.only_rhs
+                .into_iter()
+                .map(|gui_id| {
+                    let element = gui.state
+                        .borrow()
+                        .elements
+                        .get(&gui_id)
+                        .expect("must be available when in diff")
+                        .clone();
 
+                    // TODO: I must be replaced with something that can function as 
+                    // an id in every situation. Currently, I can be arbitrarily 
+                    // complex which doesn't work for an id attribute in html.
+                    let gui_id = serde_json::to_string(&gui_id).unwrap(); // TODO: unwrap
+                    trace!("gui_id: {}", gui_id); // TODO: Remove this
+
+                    (gui_id, element)
+                })
+                .collect();
+            let updated = diff.unequal
+                .into_iter()
+                .map(|gui_id| {
+                    let element = gui.state
+                        .borrow()
+                        .elements
+                        .get(&gui_id)
+                        .expect("must be available when in diff")
+                        .clone();
+
+                    // TODO: I must be replaced with something that can function as 
+                    // an id in every situation. Currently, I can be arbitrarily 
+                    // complex which doesn't work for an id attribute in html.
+                    let gui_id = serde_json::to_string(&gui_id).unwrap(); // TODO: unwrap
+                    trace!("gui_id: {}", gui_id); // TODO: Remove this
+
+                    (gui_id, element)
+                })
+                .collect();
+            ServerBrowserUpdate {
+                added,
+                removed: diff.only_lhs,
+                updated,
             }
-            *last_gui = gui;
         } else {
-            if let Some(html) = gui.to_html() {
-                if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
-                    to_browser_websocket
-                        .write_message(Message::Text(html))
-                        .unwrap(); // TODO: Error handling
-                } else {
-                    // TODO: Error handling
-                    warn!("no to_browser_websocket found");
-                }
+            let added = gui.state
+                .borrow()
+                .elements
+                .iter()
+                .map(|(gui_id, element)| {
+                    let gui_id = serde_json::to_string(&gui_id).unwrap();
+                    (gui_id, element.clone())
+                })
+                .collect();
+            ServerBrowserUpdate {
+                added,
+                removed: Vec::new(),
+                updated: BTreeMap::new(),
             }
+        };
+        if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
+            let message = serde_json::to_string(&server_browser_update).unwrap(); // TODO: unwrap
+            to_browser_websocket.write_message(Message::Text(message)).unwrap(); // TODO: unwrap
+        } else {
+            // TODO: Error handling
+            warn!("Gui ready for sending but no 'to_browser_websocket' found");
         }
+        self.last_gui = Some(gui);
     }
 }
 
