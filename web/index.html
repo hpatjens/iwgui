@@ -124,7 +124,7 @@
                     }
                     console.log("button: ", element.Button)
                     button.addEventListener ("click", function() {
-                        send_event({"ButtonPressed":gui_id})
+                        send_event({"Event":{"ButtonPressed":gui_id}})
                     });
                     return button
                 case "Label": 
