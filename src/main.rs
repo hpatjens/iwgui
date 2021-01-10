@@ -12,6 +12,7 @@ enum MyId {
     Button1,
     Button2,
     RightButton(usize),
+    LateButton,
 }
 
 impl Default for MyId {
@@ -26,6 +27,7 @@ impl Id for MyId {
             MyId::Button1 => String::from("Button1"),
             MyId::Button2 => String::from("Button2"),
             MyId::RightButton(i) => format!("RightButton.{}", i),
+            MyId::LateButton => String::from("LateButton"),
         }
     }
 
@@ -35,6 +37,7 @@ impl Id for MyId {
             "Any" => Some(MyId::Any),
             "Button1" => Some(MyId::Button1),
             "Button2" => Some(MyId::Button2),
+            "LateButton" => Some(MyId::LateButton),
             s => {
                 const PREFIX: &'static str = "RightButton.";
                 if s.starts_with(PREFIX) {
@@ -120,6 +123,8 @@ fn main() {
                 stack.label(i ^ index);
             }
 
+            // TODO: add a button here and the auto GuiIds are mixed up
+
             // Right
             let mut stack = right.stacklayout();
             stack.header("The right side".to_owned());
@@ -137,6 +142,14 @@ fn main() {
                     .text(format!("Button {}", i))
                     .finish();
             }
+            if index > 20 {
+                stack
+                    .button()
+                    .handle(MyId::LateButton)
+                    .text("Late button")
+                    .finish();
+            }
+
             connection.show_gui(gui);
             index += 1;
         }
@@ -300,8 +313,8 @@ struct ButtonBuilder<'parent, P: PushElement> {
 }
 
 impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
-    pub fn text(mut self, text: String) -> Self {
-        self.text = Some(text);
+    pub fn text<S: Into<String>>(mut self, text: S) -> Self {
+        self.text = Some(text.into());
         self
     }
 
@@ -324,9 +337,9 @@ trait PushElement: Sized {
     fn push_element(&mut self, id: GuiId, element: Element);
     fn gui(&mut self) -> &RefCell<GuiState>;
 
-    fn header(&mut self, text: String) {
+    fn header<S: Into<String>>(&mut self, text: S) {
         let id = self.gui().borrow_mut().fetch_id();
-        self.push_element(id, Element::Header(text))
+        self.push_element(id, Element::Header(text.into()))
     }
 
     fn label<T: ToString>(&mut self,value: T) {
@@ -439,6 +452,7 @@ struct JsonString(String);
 
 #[derive(Serialize)]
 struct ServerBrowserUpdate {
+    root: Option<GuiId>,
     added: BTreeMap<GuiId, Element>, // key must be String for serde_json
     removed: Vec<GuiId>,
     updated: BTreeMap<GuiId, Element>, // key must be String for serde_json
@@ -461,6 +475,9 @@ impl Connection {
     }
 
     pub fn show_gui(&mut self, gui: Gui) {
+        if gui.state.borrow().root.is_none() {
+            return;
+        }
         let server_browser_update = if let Some(last_gui) = &mut self.last_gui {
             let diff = Gui::diff(last_gui, &gui);
             // TODO: Code duplication
@@ -488,7 +505,17 @@ impl Connection {
                     (gui_id, element)
                 })
                 .collect();
+            let root = {
+                let gui_root = &gui.state.borrow().root;
+                let last_root = &last_gui.state.borrow().root;
+                if gui_root == last_root {
+                    None
+                } else {
+                    gui_root.clone()
+                }
+            };
             ServerBrowserUpdate {
+                root,
                 added,
                 removed: diff.only_lhs,
                 updated,
@@ -501,6 +528,7 @@ impl Connection {
                 .map(|(gui_id, element)| (gui_id.clone(), element.clone()))
                 .collect();
             ServerBrowserUpdate {
+                root: gui.state.borrow().root.clone(),
                 added,
                 removed: Vec::new(),
                 updated: BTreeMap::new(),

@@ -171,24 +171,29 @@
                 switch (type) {
                     case "Label":
                         let previous_node = document.getElementById(gui_id)
-                        previous_node.innerHTML = element.Label
+                        if (previous_node) {
+                            previous_node.innerHTML = element.Label
+                        } else {
+                            console.log(`Couldn't find node to apply update for GuiId ${gui_id}`)
+                        }
                         break;
                 }
             }
 
             // Add elements
             var new_dom_elements = {}; // TODO: Rename this to something like: waiting_dom_elements
+            var saved = JSON.stringify(server_browser_update.added)
             while (!is_empty(server_browser_update.added)) {
                 let [gui_id, element] = pop_first_property(server_browser_update.added)
                 new_dom_elements[gui_id] = instantiate_element(gui_id, element, server_browser_update.added, new_dom_elements)
             }
             let new_dom_elements_count = Object.keys(new_dom_elements).length;
-            if (new_dom_elements_count === 1) {
+            if (new_dom_elements_count === 1 && first_key(new_dom_elements) === server_browser_update.root) { // TODO: This does not work
                 document.body.innerHTML = ""
                 document.body.appendChild(pop_first_value(new_dom_elements))
-            } else if (new_dom_elements_count > 1) {
+            } else if (new_dom_elements_count > 0) {
                 // TODO: Maybe add a parent field to the elements
-                console.error(`Cannot add elements because we don't know where: ${new_dom_elements}`)
+                console.error("Cannot add elements because we don't know where: ", JSON.parse(saved))
             }
         }
         to_browser_socket.onclose = function(event) {
