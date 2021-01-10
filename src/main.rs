@@ -19,17 +19,70 @@ impl Default for MyId {
         MyId::Any
     }
 }
-impl<'id> Id<'id> for MyId {}
+impl Id for MyId {
+    fn to_string(&self) -> String {
+        match self {
+            MyId::Any => String::from("Any"),
+            MyId::Button1 => String::from("Button1"),
+            MyId::Button2 => String::from("Button2"),
+            MyId::RightButton(i) => format!("RightButton.{}", i),
+        }
+    }
 
-pub trait Id<'id>: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy + Serialize + Deserialize<'id> {}
+    // TODO: Maybe use Result with error message
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "Any" => Some(MyId::Any),
+            "Button1" => Some(MyId::Button1),
+            "Button2" => Some(MyId::Button2),
+            s => {
+                const PREFIX: &'static str = "RightButton.";
+                if s.starts_with(PREFIX) {
+                    if let Ok(i) = s[PREFIX.len()..].parse::<usize>() {
+                        return Some(MyId::RightButton(i));
+                    }
+                }
+                None
+            }
+        }
+    }
+}
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize)]
-enum GuiId<I> 
-where 
-    for<'id> I: Id<'id>
-{
-    Auto(usize),
-    User(I),
+pub trait Id: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy {
+    fn to_string(&self) -> String;
+    // TODO: Maybe use Result with error message
+    fn from_str(s: &str) -> Option<Self>;
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize)]
+#[serde(transparent)]
+pub struct GuiId(String);
+
+impl GuiId {
+    fn new_auto(i: usize) -> Self {
+        GuiId(format!("Auto.{}", i))
+    }
+
+    fn new_user<I: Id>(id: I) -> Self {
+        GuiId(format!("User.{}", id.to_string()))
+    }
+
+    // TODO: Maybe use Result with error message
+    fn from_str<I: Id>(s: &str) -> Option<Self> {
+        const PREFIX_AUTO: &'static str = "Auto.";
+        const PREFIX_USER: &'static str = "User.";
+        if s.starts_with(PREFIX_AUTO) {
+            if let Ok(i) = s[PREFIX_AUTO.len()..].parse::<usize>() {
+                return Some(GuiId::new_auto(i));
+            }
+        }
+        if s.starts_with(PREFIX_USER) {
+            if let Some(id) = I::from_str(&s[PREFIX_USER.len()..]) {
+                return Some(GuiId::new_user(id));
+            }
+        }
+        None
+    }
 }
 
 fn main() {
@@ -38,11 +91,11 @@ fn main() {
         .init()
         .unwrap();
 
-    let mut server = Server::<MyId>::new("127.0.0.1:8080");
+    let mut server = Server::new("127.0.0.1:8080");
     let mut index = 0;
     loop {
         for connection in &mut server.connections() {
-            let events = connection.events();
+            let events = connection.events::<MyId>();
             for event in events {
                 info!("{:?}", event);
             }
@@ -91,47 +144,32 @@ fn main() {
     }
 }
 
-struct GuiState<I>
-where
-    for<'id> I: Id<'id>
-{
+struct GuiState {
     next_id: usize,
-    root: Option<GuiId<I>>,
-    elements: BTreeMap<GuiId<I>, Element<I>>,
+    root: Option<GuiId>,
+    elements: BTreeMap<GuiId, Element>,
 }
 
-impl<I> GuiState<I>
-where
-    for<'id> I: Id<'id>
-{
-    fn fetch_id(&mut self) -> GuiId<I> {
-        let result = GuiId::Auto(self.next_id);
+impl GuiState {
+    fn fetch_id(&mut self) -> GuiId {
+        let result = GuiId::new_auto(self.next_id);
         self.next_id += 1;
         result
     }
 }
 
 #[derive(Debug)]
-struct GuiDiff<I>
-where
-    for<'id> I: Id<'id>
-{
-    only_lhs: Vec<GuiId<I>>,
-    only_rhs: Vec<GuiId<I>>,
-    unequal: Vec<GuiId<I>>,
+struct GuiDiff {
+    only_lhs: Vec<GuiId>,
+    only_rhs: Vec<GuiId>,
+    unequal: Vec<GuiId>,
 }
 
-struct Gui<I>
-where
-    for<'id> I: Id<'id>
-{
-    state: RefCell<GuiState<I>>,
+struct Gui {
+    state: RefCell<GuiState>,
 }
 
-impl<'gui, I> Gui<I>
-where 
-    for<'id> I: Id<'id>
-{
+impl<'gui> Gui {
     fn new() -> Self {
         Self {
             state: RefCell::new(GuiState {
@@ -142,7 +180,7 @@ where
         }
     }
 
-    fn diff(lhs: &Gui<I>, rhs: &Gui<I>) -> GuiDiff<I> {
+    fn diff(lhs: &Gui, rhs: &Gui) -> GuiDiff {
         let lhs_state = lhs.state.borrow();
         let rhs_state = rhs.state.borrow();
         let mut only_lhs = Vec::new();
@@ -150,14 +188,14 @@ where
         let mut unequal = Vec::new();
         for (lhs_id, lhs_element) in &lhs_state.elements {
             match rhs_state.elements.get(lhs_id) {
-                None => only_lhs.push(*lhs_id),
-                Some(rhs_element) if dbg!(rhs_element != lhs_element) => unequal.push(*lhs_id),
+                None => only_lhs.push(lhs_id.clone()),
+                Some(rhs_element) if rhs_element != lhs_element => unequal.push(lhs_id.clone()),
                 Some(_) => {},
             }
         }
         for rhs_id in rhs_state.elements.keys() {
             match lhs_state.elements.get(rhs_id) {
-                None => only_rhs.push(*rhs_id),
+                None => only_rhs.push(rhs_id.clone()),
                 Some(_) => {},
             }
         }
@@ -165,22 +203,12 @@ where
     }
 
     // TODO: Ensure that this works when called multiple times
-    fn root(&'gui mut self) -> Indeterminate<'gui, I> {
+    fn root(&'gui mut self) -> Indeterminate<'gui> {
         let mut state = self.state.borrow_mut();
         let id = state.fetch_id();
-        state.elements.insert(id, Element::Indeterminate);
-        state.root = Some(id);
+        state.elements.insert(id.clone(), Element::Indeterminate);
+        state.root = Some(id.clone());
         Indeterminate::new(&self.state, id)
-    }
-
-    fn to_html(&self) -> Option<String> {
-        let state = self.state.borrow_mut();
-        state.root.map(|root| {
-            state.elements
-                .get(&root)
-                .expect("must be inserted")
-                .to_html(&root, &*state)
-        })
     }
 }
 
@@ -188,23 +216,17 @@ where
 // Indeterminate
 // ----------------------------------------------------------------------------
 
-struct Indeterminate<'gui, I>
-where
-    for<'id> I: Id<'id>
-{
-    state: &'gui RefCell<GuiState<I>>,
-    target_id: GuiId<I>,
+struct Indeterminate<'gui> {
+    state: &'gui RefCell<GuiState>,
+    target_id: GuiId,
 }
 
-impl<'gui, I> Indeterminate<'gui, I>
-where 
-    for<'id> I: Id<'id>
-{
-    fn new(state: &'gui RefCell<GuiState<I>>, target_id: GuiId<I>) -> Self {
+impl<'gui> Indeterminate<'gui> {
+    fn new(state: &'gui RefCell<GuiState>, target_id: GuiId) -> Self {
         Self { state, target_id }
     }
 
-    fn stacklayout(self) -> StackLayout<'gui, I> {
+    fn stacklayout(self) -> StackLayout<'gui> {
         let mut state = self.state.borrow_mut();
         let element = Element::StackLayout {
             children: Vec::new(),
@@ -219,16 +241,19 @@ where
         }
     }
 
-    fn vertical_panels(self) -> (Indeterminate<'gui, I>, Indeterminate<'gui, I>) {
+    fn vertical_panels(self) -> (Indeterminate<'gui>, Indeterminate<'gui>) {
         let mut state = self.state.borrow_mut();
         let left = state.fetch_id();
         let right = state.fetch_id();
-        state.elements.insert(left, Element::Indeterminate);
-        state.elements.insert(right, Element::Indeterminate);
+        state.elements.insert(left.clone(), Element::Indeterminate);
+        state.elements.insert(right.clone(), Element::Indeterminate);
         *state
             .elements
             .get_mut(&self.target_id)
-            .expect("must be inserted") = Element::Columns { left, right };
+            .expect("must be inserted") = Element::Columns { 
+                left: left.clone(), 
+                right: right.clone(),
+            };
         (
             Indeterminate::new(self.state, left),
             Indeterminate::new(self.state, right),
@@ -240,21 +265,15 @@ where
 // StackLayout
 // ----------------------------------------------------------------------------
 
-struct StackLayout<'gui, I>
-where
-    for<'id> I: Id<'id>
-{
-    state: &'gui RefCell<GuiState<I>>,
-    id: GuiId<I>,
+struct StackLayout<'gui> {
+    state: &'gui RefCell<GuiState>,
+    id: GuiId,
 }
 
-impl<I> PushElement<I> for StackLayout<'_, I> 
-where
-    for<'id> I: Id<'id>
-{
-    fn push_element(&mut self, id: GuiId<I>, element: Element<I>) {
+impl PushElement for StackLayout<'_> {
+    fn push_element(&mut self, id: GuiId, element: Element) {
         let mut state = self.state.borrow_mut();
-        state.elements.insert(id, element);
+        state.elements.insert(id.clone(), element);
         let stacklayout = state
             .elements
             .get_mut(&self.id)
@@ -265,55 +284,34 @@ where
         }
     }
 
-    fn gui(&mut self) -> &RefCell<GuiState<I>> {
+    fn gui(&mut self) -> &RefCell<GuiState> {
         self.state
     }
-}
-
-// ----------------------------------------------------------------------------
-// Columns
-// ----------------------------------------------------------------------------
-
-struct Columns<'gui, I>
-where
-    for<'id> I: Id<'id>
-{
-    gui: &'gui mut Gui<I>,
-    id: GuiId<I>,
 }
 
 // ----------------------------------------------------------------------------
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
-struct ButtonBuilder<'parent, I, P: PushElement<I>>
-where 
-    for<'id> I: Id<'id>
-{
+struct ButtonBuilder<'parent, P: PushElement> {
     parent: &'parent mut P,
-    id: Option<I>,
+    id: Option<GuiId>,
     text: Option<String>,
-    phantom: PhantomData<I>,
 }
 
-impl<'parent, I, P: PushElement<I>> ButtonBuilder<'parent, I, P>
-where 
-    for<'id> I: Id<'id>
-{
+impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
     pub fn text(mut self, text: String) -> Self {
         self.text = Some(text);
         self
     }
 
-    pub fn handle(mut self, id: I) -> Self {
-        self.id = Some(id);
+    pub fn handle<I: Id>(mut self, id: I) -> Self {
+        self.id = Some(GuiId::new_user(id));
         self
     }
 
     pub fn finish(self) {
-        let id = self.id
-            .map(|id| GuiId::User(id))
-            .unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
+        let id = self.id.clone().unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
         self.parent.push_element(id, Element::new_button(self.text));
     }
 }
@@ -322,12 +320,9 @@ where
 // traits
 // ----------------------------------------------------------------------------
 
-trait PushElement<I>: Sized
-where
-    for<'id> I: Id<'id>
-{
-    fn push_element(&mut self, id: GuiId<I>, element: Element<I>);
-    fn gui(&mut self) -> &RefCell<GuiState<I>>;
+trait PushElement: Sized {
+    fn push_element(&mut self, id: GuiId, element: Element);
+    fn gui(&mut self) -> &RefCell<GuiState>;
 
     fn header(&mut self, text: String) {
         let id = self.gui().borrow_mut().fetch_id();
@@ -340,18 +335,17 @@ where
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
-    fn button(&mut self) -> ButtonBuilder<I, Self> {
+    fn button(&mut self) -> ButtonBuilder<Self> {
         ButtonBuilder {
             parent: self,
             id: None,
             text: None,
-            phantom: PhantomData,
         }
     }
 
-    fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui, I> {
+    fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
         let id = self.gui().borrow_mut().fetch_id();
-        self.push_element(id, Element::Indeterminate);
+        self.push_element(id.clone(), Element::Indeterminate);
         Indeterminate::new(self.gui(), id)
     }
 }
@@ -361,10 +355,7 @@ where
 // ----------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq, Serialize, Clone)]
-enum Element<I>
-where 
-    for<'id> I: Id<'id>
-{
+enum Element {
     Indeterminate,
     Header(String),
     Label(String),
@@ -372,41 +363,29 @@ where
         text: Option<String>,
     },
     StackLayout {
-        children: Vec<GuiId<I>>, // OPTIMIZE: Get rid of heap allocation
+        children: Vec<GuiId>,
     },
     Columns {
-        left: GuiId<I>,
-        right: GuiId<I>,
+        left: GuiId,
+        right: GuiId,
     },
 }
 
-impl<I> Element<I>
-where 
-    for<'id> I: Id<'id>
-{
-    fn new_button(text: Option<String>) -> Element<I> {
+impl Element {
+    fn new_button(text: Option<String>) -> Element {
         Element::Button { 
             text,
         }
     }
 
-    fn to_html(&self, id: &GuiId<I>, state: &GuiState<I>) -> String {
+    fn to_html(&self, id: &GuiId, state: &GuiState) -> String {
         match self {
             Element::Indeterminate => "".to_owned(),
             Element::Header(text) => format!("<h1>{}</h1>", text),
             Element::Label(value) => format!("<div>{}</div>", value),
             Element::Button { text } => {
                 let text = text.clone().unwrap_or_else(|| "Button".to_owned());
-                if let GuiId::User(user_id) = id {
-                    // TODO: Use the event
-
-                    let event = serde_json::to_string(&user_id).unwrap();
-
-
-                    format!("<button onclick=\'to_server_socket.send({})\'>{}</button>", event, text)
-                } else {
-                    format!("<button>{}</button>", text)
-                }
+                format!("<button>{}</button>", text)
             }
             Element::StackLayout { children } => {
                 let children = children
@@ -435,48 +414,55 @@ where
 //
 // ----------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
-#[serde(bound = "for<'id> I: Id<'id>")]
-pub enum Event<I>
-where
-    for<'id> I: Id<'id>
-{
-    ButtonPressed(I),
+#[derive(Debug)]
+pub enum Event {
+    ButtonPressed(GuiId),
 }
+
+#[derive(Debug, Deserialize)]
+pub enum BrowserServerEvent {
+    ButtonPressed(String)
+}
+
+impl Event {
+    pub fn from<I: Id>(event: BrowserServerEvent) -> Option<Self> {
+        match event {
+            BrowserServerEvent::ButtonPressed(identifier) => GuiId::from_str::<I>(&identifier).map(|gui_id| Event::ButtonPressed(gui_id)),
+        }
+    }
+}
+
+/// Json value
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+struct JsonString(String);
 
 #[derive(Serialize)]
-struct ServerBrowserUpdate<I>
-where 
-    for<'id> I: Id<'id>
-{
-    added: BTreeMap<String, Element<I>>, // key must be String for serde_json
-    removed: Vec<GuiId<I>>,
-    updated: BTreeMap<String, Element<I>>, // key must be String for serde_json
+struct ServerBrowserUpdate {
+    added: BTreeMap<GuiId, JsonString>, // key must be String for serde_json
+    removed: Vec<GuiId>,
+    updated: BTreeMap<GuiId, JsonString>, // key must be String for serde_json
 }
 
-struct Connection<I>
-where
-    for<'id> I: Id<'id>
-{
+struct Connection {
     uuid: Uuid,
     to_browser_websocket: Option<WebSocket<TcpStream>>, // This is assigned second
-    last_gui: Option<Gui<I>>,
-    pending_events: Arc<Mutex<Vec<Event<I>>>>,
+    last_gui: Option<Gui>,
+    pending_events: Arc<Mutex<Vec<BrowserServerEvent>>>, // TODO: Not good that this has to be a different type of event
 }
 
-impl<I> Connection<I> 
-where
-    for<'id> I: Id<'id>
-{
-    pub fn events(&mut self) -> Vec<Event<I>> {
+impl Connection {
+    pub fn events<I: Id>(&mut self) -> Vec<Event> {
         let mut pending_events = self.pending_events.lock().unwrap(); // TODO: unwrap
         mem::take(&mut *pending_events)
+            .into_iter()
+            .map(|event| Event::from::<I>(event).unwrap()) // TODO: unwrap
+            .collect()
     }
 
-    pub fn show_gui(&mut self, gui: Gui<I>) {
+    pub fn show_gui(&mut self, gui: Gui) {
         let server_browser_update = if let Some(last_gui) = &mut self.last_gui {
             let diff = Gui::diff(last_gui, &gui);
-            dbg!(&diff);
             // TODO: Code duplication
             let added = diff.only_rhs
                 .into_iter()
@@ -485,15 +471,8 @@ where
                         .borrow()
                         .elements
                         .get(&gui_id)
-                        .expect("must be available when in diff")
-                        .clone();
-
-                    // TODO: I must be replaced with something that can function as 
-                    // an id in every situation. Currently, I can be arbitrarily 
-                    // complex which doesn't work for an id attribute in html.
-                    let gui_id = serde_json::to_string(&gui_id).unwrap(); // TODO: unwrap
-                    trace!("gui_id: {}", gui_id); // TODO: Remove this
-
+                        .map(|element| JsonString(serde_json::to_string(&element).unwrap())) // TODO: unwrap
+                        .expect("must be available when in diff");
                     (gui_id, element)
                 })
                 .collect();
@@ -504,15 +483,8 @@ where
                         .borrow()
                         .elements
                         .get(&gui_id)
-                        .expect("must be available when in diff")
-                        .clone();
-
-                    // TODO: I must be replaced with something that can function as 
-                    // an id in every situation. Currently, I can be arbitrarily 
-                    // complex which doesn't work for an id attribute in html.
-                    let gui_id = serde_json::to_string(&gui_id).unwrap(); // TODO: unwrap
-                    trace!("gui_id: {}", gui_id); // TODO: Remove this
-
+                        .map(|element| JsonString(serde_json::to_string(&element).unwrap())) // TODO: unwrap
+                        .expect("must be available when in diff");
                     (gui_id, element)
                 })
                 .collect();
@@ -527,8 +499,8 @@ where
                 .elements
                 .iter()
                 .map(|(gui_id, element)| {
-                    let gui_id = serde_json::to_string(&gui_id).unwrap();
-                    (gui_id, element.clone())
+                    let element = JsonString(serde_json::to_string(&element).unwrap());
+                    (gui_id.clone(), element)
                 })
                 .collect();
             ServerBrowserUpdate {
@@ -548,37 +520,27 @@ where
     }
 }
 
-struct Connections<'a, I> 
-where
-    for<'id> I: Id<'id>
-{
-    r: MutexGuard<'a, Vec<Connection<I>>>,
+// TODO: Should have the type parameter "I: Id" because it doesn't make sense
+// that a connection would be handled with different id types.
+struct Connections<'a> {
+    r: MutexGuard<'a, Vec<Connection>>,
 }
 
-impl<'a, 'b: 'a, I> IntoIterator for &'a mut Connections<'b, I> 
-where
-    for<'id> I: Id<'id>
-{
-    type IntoIter = IterMut<'a, Connection<I>>;
-    type Item = &'a mut Connection<I>;
-    fn into_iter(self) -> IterMut<'a, Connection<I>> {
+impl<'a, 'b: 'a> IntoIterator for &'a mut Connections<'b> {
+    type IntoIter = IterMut<'a, Connection>;
+    type Item = &'a mut Connection;
+    fn into_iter(self) -> IterMut<'a, Connection> {
         self.r.iter_mut()
     }
 }
 
 const WEBSOCKET_ADDRESS: &'static str = "127.0.0.1:9001";
 
-struct Server<I> 
-where
-    for<'id> I: Id<'id>
-{
-    connections: Arc<Mutex<Vec<Connection<I>>>>,
+struct Server {
+    connections: Arc<Mutex<Vec<Connection>>>,
 }
 
-impl<I> Server<I> 
-where
-    for<'id> I: 'static + Id<'id>
-{
+impl Server {
     // TODO: IP
     pub fn new<A: ToSocketAddrs + Send + 'static>(address: A) -> Self {
         let connections = Arc::new(Mutex::new(Vec::new()));
@@ -598,16 +560,13 @@ where
         Self { connections }
     }
 
-    pub fn connections<'a>(&mut self) -> Connections<I> {
+    pub fn connections<'a>(&mut self) -> Connections {
         let connections = self.connections.lock().unwrap(); // TODO: Error handling
         Connections { r: connections }
     }
 }
 
-fn spawn_incoming_thread<I>(address: &'static str, connections: Arc<Mutex<Vec<Connection<I>>>>)
-where 
-    for<'id> I: 'static + Id<'id>
-{
+fn spawn_incoming_thread(address: &'static str, connections: Arc<Mutex<Vec<Connection>>>) {
     thread::spawn(move || {
         let server = TcpListener::bind(address).unwrap();
         for stream in server.incoming() {
@@ -631,26 +590,19 @@ enum WebsocketDirection {
 }
 
 #[derive(Deserialize)]
-#[serde(bound = "for<'id> I: Id<'id>")]
-enum BrowserServerMessage<I>
-where
-    for<'id> I: Id<'id>
-{
+enum BrowserServerMessage {
     Welcome {
         direction: WebsocketDirection,
         uuid: String,
     },
-    Event(Event<I>),
+    Event(BrowserServerEvent),
 }
 
-fn handle_incoming_event<I>(
+fn handle_incoming_event(
     message: &str,
-    connections: Arc<Mutex<Vec<Connection<I>>>>, 
+    connections: Arc<Mutex<Vec<Connection>>>, 
     uuid: Uuid,
-)
-where 
-    for<'id> I: 'static + Id<'id>
-{
+) {
     let pending_events = {
         let connections = connections.lock().unwrap(); // TODO: unwrap
         let connection = connections
@@ -663,7 +615,7 @@ where
             return;
         }
     };
-    match serde_json::from_str::<BrowserServerMessage<I>>(message) {
+    match serde_json::from_str::<BrowserServerMessage>(message) {
         Ok(BrowserServerMessage::Event(event)) => {
             info!("Received event: {:?}", event);
             let mut pending_events = pending_events.lock().unwrap();
@@ -678,15 +630,12 @@ where
     }
 }
 
-fn handle_welcome_message<I>(
+fn handle_welcome_message(
     websocket: WebSocket<TcpStream>,
-    connections: Arc<Mutex<Vec<Connection<I>>>>, 
+    connections: Arc<Mutex<Vec<Connection>>>, 
     direction: WebsocketDirection, 
     uuid: &str,
-)
-where 
-    for<'id> I: 'static + Id<'id>
-{
+) {
     info!("Received welcome message from {}", uuid);
     if let Ok(uuid) = Uuid::parse_str(uuid) {
         match direction {
@@ -724,17 +673,14 @@ where
     }
 }
 
-fn handle_incoming_websocket_connection<I>(stream: TcpStream, connections: Arc<Mutex<Vec<Connection<I>>>>)
-where 
-    for<'id> I: 'static + Id<'id>
-{
+fn handle_incoming_websocket_connection(stream: TcpStream, connections: Arc<Mutex<Vec<Connection>>>) {
     thread::spawn(move || {
         info!("Started websocket connection thread");
         match tungstenite::server::accept(stream) {
             Ok(mut websocket) => {
                 match websocket.read_message() {
                     Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<BrowserServerMessage<I>>(&text) {
+                        match serde_json::from_str::<BrowserServerMessage>(&text) {
                             Ok(BrowserServerMessage::Welcome { direction, uuid }) => {
                                 handle_welcome_message(websocket, connections, direction, &uuid);
                             }
