@@ -439,9 +439,9 @@ struct JsonString(String);
 
 #[derive(Serialize)]
 struct ServerBrowserUpdate {
-    added: BTreeMap<GuiId, JsonString>, // key must be String for serde_json
+    added: BTreeMap<GuiId, Element>, // key must be String for serde_json
     removed: Vec<GuiId>,
-    updated: BTreeMap<GuiId, JsonString>, // key must be String for serde_json
+    updated: BTreeMap<GuiId, Element>, // key must be String for serde_json
 }
 
 struct Connection {
@@ -471,8 +471,8 @@ impl Connection {
                         .borrow()
                         .elements
                         .get(&gui_id)
-                        .map(|element| JsonString(serde_json::to_string(&element).unwrap())) // TODO: unwrap
-                        .expect("must be available when in diff");
+                        .expect("must be available when in diff")
+                        .clone();
                     (gui_id, element)
                 })
                 .collect();
@@ -483,8 +483,8 @@ impl Connection {
                         .borrow()
                         .elements
                         .get(&gui_id)
-                        .map(|element| JsonString(serde_json::to_string(&element).unwrap())) // TODO: unwrap
-                        .expect("must be available when in diff");
+                        .expect("must be available when in diff")
+                        .clone();
                     (gui_id, element)
                 })
                 .collect();
@@ -498,10 +498,7 @@ impl Connection {
                 .borrow()
                 .elements
                 .iter()
-                .map(|(gui_id, element)| {
-                    let element = JsonString(serde_json::to_string(&element).unwrap());
-                    (gui_id.clone(), element)
-                })
+                .map(|(gui_id, element)| (gui_id.clone(), element.clone()))
                 .collect();
             ServerBrowserUpdate {
                 added,
