@@ -11,6 +11,7 @@
         .column {
             flex: 50%;
         }
+
     </style>
     <script>
         let to_browser_socket = new WebSocket("ws://localhost:9001")
@@ -126,7 +127,6 @@
                     } else {
                         button.innerHTML = "Button"
                     }
-                    console.log("button: ", element.Button)
                     button.addEventListener ("click", function() {
                         send_event({"Event":{"ButtonPressed":gui_id}})
                     });
@@ -158,12 +158,6 @@
         to_browser_socket.onmessage = function(event) {
             // This is a serialized `ServerBrowserUpdate` on the Rust side
             var server_browser_update = JSON.parse(event.data)
-
-            // Debug
-            // TODO: remove this
-            for (const added_gui_id in server_browser_update.added) {
-                console.log(`${added_gui_id} -> ${JSON.stringify(server_browser_update.added[added_gui_id])}`)
-            }
 
             // Remove elements
             for (const gui_id in server_browser_update.removed) {
