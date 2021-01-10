@@ -64,6 +64,7 @@
                 case "StackLayout": 
                     /* <div>{}</div> */
                     let stack_layout = document.createElement("div")
+                    stack_layout.id = gui_id
                     for (const child_gui_id of element.StackLayout.children) {
                         if (child_gui_id in new_dom_elements) {
                             stack_layout.appendChild(new_dom_elements[child_gui_id])
@@ -77,6 +78,7 @@
                     }
                     return stack_layout
                 case "Columns":
+                    // TODO: Cleanup this stuff
                     /*
                     <div class="row">
                         <div class="column">{}</div>
@@ -85,6 +87,7 @@
                     */
                     // Parent
                     let columns = document.createElement("div")
+                    columns.id = gui_id
                     columns.classList.add("row")
                     // Left child
                     let left = document.createElement("div")
@@ -117,6 +120,7 @@
                     return columns
                 case "Button":
                     let button = document.createElement("button")
+                    button.id = gui_id
                     if (element.Button.text) {
                         button.innerHTML = element.Button.text
                     } else {
@@ -129,10 +133,12 @@
                     return button
                 case "Label": 
                     let label = document.createElement("div")
+                    label.id = gui_id
                     label.innerHTML = element.Label
                     return label
                 case "Header":
                     let header = document.createElement("h1")
+                    header.id = gui_id
                     header.innerHTML = element.Header
                     return header
                 default:
@@ -159,22 +165,37 @@
                 console.log(`${added_gui_id} -> ${JSON.stringify(server_browser_update.added[added_gui_id])}`)
             }
 
-            // Get first added element
+            // Remove elements
+            for (const gui_id in server_browser_update.removed) {
+                document.getElementById(gui_id).remove()
+            }
+
+            // Update elements
+            for (const gui_id in server_browser_update.updated) {
+                let element = server_browser_update.updated[gui_id]
+                let type = first_key(element)
+                switch (type) {
+                    case "Label":
+                        let previous_node = document.getElementById(gui_id)
+                        previous_node.innerHTML = element.Label
+                        break;
+                }
+            }
+
+            // Add elements
             var new_dom_elements = {}; // TODO: Rename this to something like: waiting_dom_elements
             while (!is_empty(server_browser_update.added)) {
                 let [gui_id, element] = pop_first_property(server_browser_update.added)
                 new_dom_elements[gui_id] = instantiate_element(gui_id, element, server_browser_update.added, new_dom_elements)
             }
-            console.log(Object.keys(new_dom_elements).length)
-            if (Object.keys(new_dom_elements).length === 1) {
+            let new_dom_elements_count = Object.keys(new_dom_elements).length;
+            if (new_dom_elements_count === 1) {
                 document.body.innerHTML = ""
                 document.body.appendChild(pop_first_value(new_dom_elements))
-            } else {
-
+            } else if (new_dom_elements_count > 1) {
+                // TODO: Maybe add a parent field to the elements
+                console.error(`Cannot add elements because we don't know where: ${new_dom_elements}`)
             }
-            
-
-
         }
         to_browser_socket.onclose = function(event) {
             if (event.wasClean) {
