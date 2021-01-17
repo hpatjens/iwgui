@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::BTreeMap, fmt, io::{Read, Write}, marker::
 
 use log::{LevelFilter, debug, error, info, trace, warn};
 use simple_logger::SimpleLogger;
-use tungstenite::{Message, WebSocket};
+use tungstenite::{Message, WebSocket, error::Error};
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 
@@ -538,7 +538,17 @@ impl Connection {
         };
         if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
             let message = serde_json::to_string(&server_browser_update).unwrap(); // TODO: unwrap
-            to_browser_websocket.write_message(Message::Text(message)).unwrap(); // TODO: unwrap
+            match to_browser_websocket.write_message(Message::Text(message)) {
+                Ok(()) => {
+
+                }
+                Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::ConnectionAborted => {
+                    // Happens when the page is reloaded
+                }
+                Err(err) => {
+                    panic!(err);
+                }
+            }
         } else {
             // TODO: Error handling
             warn!("Gui ready for sending but no 'to_browser_websocket' found");
