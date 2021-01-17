@@ -1,13 +1,10 @@
-
-use std::{cell::RefCell, collections::BTreeMap, fmt, io::{Read, Write}, marker::PhantomData, mem, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread, time::Duration};
-
-use log::{LevelFilter, debug, error, info, trace, warn};
-use simple_logger::SimpleLogger;
+use std::{io::{Read, Write}, mem, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread};
+use log::{debug, error, info, warn};
 use tungstenite::{Message, WebSocket, error::Error};
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
+use serde::Deserialize;
 
-use crate::gui::{Id, Gui, Event, BrowserServerEvent, ServerBrowserUpdate};
+use crate::gui::{Id, Gui, Event, BrowserServerEvent};
 
 pub struct Connection {
     uuid: Uuid,
