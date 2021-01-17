@@ -5,11 +5,12 @@ use std::{
     mem,
     net::{TcpListener, TcpStream, ToSocketAddrs},
     slice::IterMut,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
     thread,
 };
 use tungstenite::{error::Error, Message, WebSocket};
 use uuid::Uuid;
+use parking_lot::{Mutex, MutexGuard};
 
 use crate::gui::{BrowserServerEvent, Event, Gui, Id};
 
@@ -22,7 +23,7 @@ pub struct Connection {
 
 impl Connection {
     pub fn events<I: Id>(&mut self) -> Vec<Event> {
-        let mut pending_events = self.pending_events.lock().unwrap(); // TODO: unwrap
+        let mut pending_events = self.pending_events.lock();
         mem::take(&mut *pending_events)
             .into_iter()
             .map(|event| Event::from::<I>(event).unwrap()) // TODO: unwrap
@@ -94,7 +95,7 @@ impl Server {
     }
 
     pub fn connections<'a>(&mut self) -> Connections {
-        let connections = self.connections.lock().unwrap(); // TODO: Error handling
+        let connections = self.connections.lock();
         Connections { r: connections }
     }
 }
@@ -133,7 +134,7 @@ enum BrowserServerMessage {
 
 fn handle_incoming_event(message: &str, connections: Arc<Mutex<Vec<Connection>>>, uuid: Uuid) {
     let pending_events = {
-        let connections = connections.lock().unwrap(); // TODO: unwrap
+        let connections = connections.lock();
         let connection = connections.iter().find(|c| c.uuid == uuid);
         if let Some(connection) = connection {
             connection.pending_events.clone()
@@ -145,7 +146,7 @@ fn handle_incoming_event(message: &str, connections: Arc<Mutex<Vec<Connection>>>
     match serde_json::from_str::<BrowserServerMessage>(message) {
         Ok(BrowserServerMessage::Event(event)) => {
             info!("Received event: {:?}", event);
-            let mut pending_events = pending_events.lock().unwrap();
+            let mut pending_events = pending_events.lock();
             pending_events.push(event);
         }
         Ok(BrowserServerMessage::Welcome { .. }) => {
@@ -173,7 +174,7 @@ fn handle_welcome_message(
                     last_gui: None,
                     pending_events: Arc::new(Mutex::new(Vec::new())),
                 };
-                let mut connections = connections.lock().unwrap(); // TODO: unwrap
+                let mut connections = connections.lock();
                 connections.push(connection);
                 let connections_array = connections
                     .iter()
