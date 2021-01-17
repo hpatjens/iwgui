@@ -110,43 +110,27 @@ impl<'gui> Gui {
     ) -> ServerBrowserUpdate {
         if let Some(previous_gui) = previous_gui {
             let diff = Gui::diff(previous_gui, &current_gui);
-            // TODO: Code duplication
-            let added = diff
-                .only_rhs
-                .into_iter()
-                .map(|gui_id| {
-                    let element = current_gui
-                        .state
-                        .borrow()
-                        .elements
-                        .get(&gui_id)
-                        .expect("must be available when in diff")
-                        .clone();
-                    (gui_id, element)
-                })
-                .collect();
-            let updated = diff
-                .unequal
-                .into_iter()
-                .map(|gui_id| {
-                    let element = current_gui
-                        .state
-                        .borrow()
-                        .elements
-                        .get(&gui_id)
-                        .expect("must be available when in diff")
-                        .clone();
-                    (gui_id, element)
-                })
-                .collect();
+            fn to_tuples(gui_ids: Vec<GuiId>, gui: &Gui) -> BTreeMap<GuiId, Element> {
+                gui_ids
+                    .into_iter()
+                    .map(|gui_id| {
+                        let element = gui
+                            .state
+                            .borrow()
+                            .elements
+                            .get(&gui_id)
+                            .expect("must be available when in diff")
+                            .clone();
+                        (gui_id, element)
+                    })
+                    .collect()
+            }
+            let added = to_tuples(diff.only_rhs, current_gui);
+            let updated = to_tuples(diff.unequal, current_gui);
             let root = {
                 let gui_root = &current_gui.state.borrow().root;
                 let last_root = &previous_gui.state.borrow().root;
-                if gui_root == last_root {
-                    None
-                } else {
-                    gui_root.clone()
-                }
+                if gui_root == last_root { None } else { gui_root.clone() }
             };
             ServerBrowserUpdate {
                 root,
@@ -155,16 +139,10 @@ impl<'gui> Gui {
                 updated,
             }
         } else {
-            let added = current_gui
-                .state
-                .borrow()
-                .elements
-                .iter()
-                .map(|(gui_id, element)| (gui_id.clone(), element.clone()))
-                .collect();
+            let state = current_gui.state.borrow();
             ServerBrowserUpdate {
-                root: current_gui.state.borrow().root.clone(),
-                added,
+                root: state.root.clone(),
+                added: state.elements.clone(),
                 removed: Vec::new(),
                 updated: BTreeMap::new(),
             }
