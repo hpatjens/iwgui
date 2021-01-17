@@ -17,6 +17,8 @@
         let to_browser_socket = new WebSocket("ws://localhost:9001")
         let to_server_socket = new WebSocket("ws://localhost:9001")
         let uuid = #uuid
+        let vdom_root = null
+        let vdom = {}
 
         /// true when the object has to properties, otherwise false
         function is_empty(obj) {
@@ -159,41 +161,27 @@
             // This is a serialized `ServerBrowserUpdate` on the Rust side
             var server_browser_update = JSON.parse(event.data)
 
-            // Remove elements
+            // Apply changes to the browsers VDom
             for (const gui_id in server_browser_update.removed) {
-                document.getElementById(gui_id).remove()
+                vdom.remove(gui_id)
             }
-
-            // Update elements
             for (const gui_id in server_browser_update.updated) {
-                let element = server_browser_update.updated[gui_id]
-                let type = first_key(element)
-                switch (type) {
-                    case "Label":
-                        let previous_node = document.getElementById(gui_id)
-                        if (previous_node) {
-                            previous_node.innerHTML = element.Label
-                        } else {
-                            console.log(`Couldn't find node to apply update for GuiId ${gui_id}`)
-                        }
-                        break;
-                }
+                vdom[gui_id] = server_browser_update.updated[gui_id]
+            }
+            for (const gui_id in server_browser_update.added) {
+                vdom[gui_id] = server_browser_update.added[gui_id]
             }
 
-            // Add elements
-            var new_dom_elements = {}; // TODO: Rename this to something like: waiting_dom_elements
-            var saved = JSON.stringify(server_browser_update.added)
-            while (!is_empty(server_browser_update.added)) {
-                let [gui_id, element] = pop_first_property(server_browser_update.added)
-                new_dom_elements[gui_id] = instantiate_element(gui_id, element, server_browser_update.added, new_dom_elements)
+
+            if (server_browser_update.root) {
+                vdom_root = server_browser_update.root
             }
-            let new_dom_elements_count = Object.keys(new_dom_elements).length;
-            if (new_dom_elements_count === 1 && first_key(new_dom_elements) === server_browser_update.root) { // TODO: This does not work
-                document.body.innerHTML = ""
-                document.body.appendChild(pop_first_value(new_dom_elements))
-            } else if (new_dom_elements_count > 0) {
-                // TODO: Maybe add a parent field to the elements
-                console.error("Cannot add elements because we don't know where: ", JSON.parse(saved))
+            let new_body = convert_to_dom(vdom_root, vdom)
+            let body = document.body.firstChild
+            if (body == null) {
+                document.body.appendChild(new_body)
+            } else if (body != new_body) {
+                body.replaceWith(new_body)
             }
         }
         to_browser_socket.onclose = function(event) {
@@ -232,8 +220,160 @@
             console.log(`[error] ${error.message}`)
         }
 
+        function convert_to_dom(gui_id, vdom) {
+            // Create a new dom node
+            let node = vdom[gui_id]
+            let type = first_key(node)
+            let create_or_update_function = ({
+                "StackLayout": create_or_update_stack_layout,
+                "Columns": create_or_update_columns,
+                "Button": create_or_update_buttons,
+                "Label": create_or_update_label,
+                "Header": create_or_update_header,
+            }[type])
+            let dom_node = create_or_update_function(gui_id, vdom)
+            if (!dom_node) {
+                console.error({ errorMsg: "Unknown type of element", type: type })
+                    return null
+                    // TODO: Propagate failure case
+            }
+            return dom_node
+        }
+        function reuse_or_create(node, f) {
+            if (node.dom_node) {
+                return node.dom_node
+            } else {
+                node.dom_node = f()
+                return node.dom_node
+            }
+        }
+        function create_or_update_stack_layout(gui_id, vdom) {
+            /* <div>{}</div> */
+            let node = vdom[gui_id]
+            let dom_node = reuse_or_create(node, () => {
+                let dom_node = document.createElement("div")
+                dom_node.id = gui_id
+                return dom_node
+            })
 
+            var index = 0
+            for (const child_gui_id of node.StackLayout.children) {
+                let new_child = convert_to_dom(child_gui_id, vdom)
+                let child = dom_node.childNodes.item(index)
+                if (child == null) {
+                    dom_node.appendChild(new_child)
+                } else if (child != new_child) {
+                    child.replaceWith(new_child)
+                }
+                index += 1
+            }
 
+            /*
+            dom_node.innerHTML = ""
+            for (const child_gui_id of node.StackLayout.children) {
+                // let new_child = convert_to_dom(child_gui_id, vdom)
+                // let child = document.getElementById(gui_id)
+                // if (child == null) {
+                //     dom_node.appendChild(new_child)
+                // } else if (child != new_child) {
+                //     child.replaceWith(new_child)
+                // }
+                let child = convert_to_dom(child_gui_id, vdom)
+                dom_node.appendChild(child)
+            }
+            */
+            // TODO: Remove children that were not hit
+            return dom_node
+        }
+        function create_or_update_columns(gui_id, vdom) {
+            // TODO: Cleanup this stuff
+            /*
+            <div class="row">
+                <div class="column">{}</div>
+                <div class="column">{}</div>
+            </div>
+            */
+            let node = vdom[gui_id]
+            let dom_node = reuse_or_create(node, () => {
+                // Parent
+                let columns = document.createElement("div")
+                columns.id = gui_id
+                columns.classList.add("row")
+
+                // Left child
+                let left = document.createElement("div")
+                left.id = "left"
+                left.classList.add("column")
+                columns.appendChild(left)
+
+                // Right child
+                let right = document.createElement("div")
+                right.id = "right"
+                right.classList.add("column")
+                columns.appendChild(right)
+
+                return columns
+            })
+
+            let left_gui_id = node.Columns.left
+            let new_left_content = convert_to_dom(left_gui_id, vdom)
+            let left = dom_node.querySelector("#left")
+            let left_content = left.firstChild
+            if (left_content == null) {
+                left.appendChild(new_left_content)
+            } else if (left_content != new_left_content) {
+                left_content.replaceWith(new_left_content)
+            }
+
+            let right_gui_id = node.Columns.right
+            let new_right_content = convert_to_dom(right_gui_id, vdom)
+            let right = dom_node.querySelector("#right")
+            let right_content = right.firstChild
+            if (right_content == null) {
+                right.appendChild(new_right_content)
+            } else if (right_content != new_right_content) {
+                right_content.replaceWith(new_right_content)
+            }
+
+            return dom_node
+        }
+        function create_or_update_buttons(gui_id, vdom) {
+            let node = vdom[gui_id]
+            let dom_node = reuse_or_create(node, () => {
+                let button = document.createElement("button")
+                button.id = gui_id
+                if (node.Button.text) {
+                    button.innerHTML = node.Button.text
+                } else {
+                    button.innerHTML = "Button"
+                }
+                button.addEventListener ("click", function() {
+                    send_event({"Event":{"ButtonPressed":gui_id}})
+                });
+                return button
+            })
+            return dom_node
+        }
+        function create_or_update_label(gui_id, vdom) {
+            let node = vdom[gui_id]
+            let dom_node = reuse_or_create(node, () => {
+                let label = document.createElement("div")
+                label.id = gui_id
+                label.innerHTML = node.Label
+                return label
+            })
+            return dom_node
+        }
+        function create_or_update_header(gui_id, vdom) {
+            let node = vdom[gui_id]
+            let dom_node = reuse_or_create(node, () => {
+                let header = document.createElement("h1")
+                header.id = gui_id
+                header.innerHTML = node.Header
+                return header
+            })
+            return dom_node
+        }
 
 
         function send_event(event) {

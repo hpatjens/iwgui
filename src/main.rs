@@ -120,10 +120,12 @@ fn main() {
                 .text("Button 2".to_owned())
                 .finish();
             for i in 0..40 {
-                stack.label(i ^ index);
+                if (i + index) % 13 == 1 {
+                    stack.button().text(format!("{}", i)).finish();
+                } else {
+                    stack.label(i ^ index);
+                }
             }
-
-            // TODO: add a button here and the auto GuiIds are mixed up
 
             // Right
             let mut stack = right.stacklayout();
