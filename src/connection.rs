@@ -1,10 +1,17 @@
-use std::{io::{Read, Write}, mem, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::{Arc, Mutex, MutexGuard}, thread};
 use log::{debug, error, info, warn};
-use tungstenite::{Message, WebSocket, error::Error};
-use uuid::Uuid;
 use serde::Deserialize;
+use std::{
+    io::{Read, Write},
+    mem,
+    net::{TcpListener, TcpStream, ToSocketAddrs},
+    slice::IterMut,
+    sync::{Arc, Mutex, MutexGuard},
+    thread,
+};
+use tungstenite::{error::Error, Message, WebSocket};
+use uuid::Uuid;
 
-use crate::gui::{Id, Gui, Event, BrowserServerEvent};
+use crate::gui::{BrowserServerEvent, Event, Gui, Id};
 
 pub struct Connection {
     uuid: Uuid,
@@ -30,9 +37,7 @@ impl Connection {
         if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
             let message = serde_json::to_string(&server_browser_update).unwrap(); // TODO: unwrap
             match to_browser_websocket.write_message(Message::Text(message)) {
-                Ok(()) => {
-
-                }
+                Ok(()) => {}
                 Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::ConnectionAborted => {
                     // Happens when the page is reloaded
                 }
@@ -126,16 +131,10 @@ enum BrowserServerMessage {
     Event(BrowserServerEvent),
 }
 
-fn handle_incoming_event(
-    message: &str,
-    connections: Arc<Mutex<Vec<Connection>>>, 
-    uuid: Uuid,
-) {
+fn handle_incoming_event(message: &str, connections: Arc<Mutex<Vec<Connection>>>, uuid: Uuid) {
     let pending_events = {
         let connections = connections.lock().unwrap(); // TODO: unwrap
-        let connection = connections
-            .iter()
-            .find(|c| c.uuid == uuid);
+        let connection = connections.iter().find(|c| c.uuid == uuid);
         if let Some(connection) = connection {
             connection.pending_events.clone()
         } else {
@@ -148,7 +147,7 @@ fn handle_incoming_event(
             info!("Received event: {:?}", event);
             let mut pending_events = pending_events.lock().unwrap();
             pending_events.push(event);
-        },
+        }
         Ok(BrowserServerMessage::Welcome { .. }) => {
             todo!() // TODO: Error handling
         }
@@ -160,8 +159,8 @@ fn handle_incoming_event(
 
 fn handle_welcome_message(
     websocket: WebSocket<TcpStream>,
-    connections: Arc<Mutex<Vec<Connection>>>, 
-    direction: WebsocketDirection, 
+    connections: Arc<Mutex<Vec<Connection>>>,
+    direction: WebsocketDirection,
     uuid: &str,
 ) {
     info!("Received welcome message from {}", uuid);
@@ -187,8 +186,12 @@ fn handle_welcome_message(
                 let mut websocket = websocket;
                 loop {
                     match websocket.read_message() {
-                        Ok(Message::Text(message)) => handle_incoming_event(&message, connections.clone(), uuid),
-                        Ok(unexpected_message) => warn!("Unexpected message: {:?}", unexpected_message),
+                        Ok(Message::Text(message)) => {
+                            handle_incoming_event(&message, connections.clone(), uuid)
+                        }
+                        Ok(unexpected_message) => {
+                            warn!("Unexpected message: {:?}", unexpected_message)
+                        }
                         Err(err) => {
                             panic!(err);
                         }
@@ -197,33 +200,35 @@ fn handle_welcome_message(
             }
         }
     } else {
-        panic!("Could not parse uuid message in 'welcome' message: {}", uuid);
+        panic!(
+            "Could not parse uuid message in 'welcome' message: {}",
+            uuid
+        );
     }
 }
 
-fn handle_incoming_websocket_connection(stream: TcpStream, connections: Arc<Mutex<Vec<Connection>>>) {
+fn handle_incoming_websocket_connection(
+    stream: TcpStream,
+    connections: Arc<Mutex<Vec<Connection>>>,
+) {
     thread::spawn(move || {
         info!("Started websocket connection thread");
         match tungstenite::server::accept(stream) {
-            Ok(mut websocket) => {
-                match websocket.read_message() {
-                    Ok(Message::Text(text)) => {
-                        match serde_json::from_str::<BrowserServerMessage>(&text) {
-                            Ok(BrowserServerMessage::Welcome { direction, uuid }) => {
-                                handle_welcome_message(websocket, connections, direction, &uuid);
-                            }
-                            Ok(_other) => {
-                                todo!()
-                            }
-                            Err(err) => {
-                                panic!(err);
-                            }
+            Ok(mut websocket) => match websocket.read_message() {
+                Ok(Message::Text(text)) => {
+                    match serde_json::from_str::<BrowserServerMessage>(&text) {
+                        Ok(BrowserServerMessage::Welcome { direction, uuid }) => {
+                            handle_welcome_message(websocket, connections, direction, &uuid);
+                        }
+                        Ok(_other) => todo!(),
+                        Err(err) => {
+                            panic!(err);
                         }
                     }
-                    Ok(..) => warn!("Unknown message type from websocket"),
-                    Err(err) => panic!(err),
                 }
-            }
+                Ok(..) => warn!("Unknown message type from websocket"),
+                Err(err) => panic!(err),
+            },
             Err(err) => {
                 error!("{}", err);
             }

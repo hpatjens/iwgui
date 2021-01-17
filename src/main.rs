@@ -1,12 +1,12 @@
-mod gui;
 mod connection;
+mod gui;
 
-use std::{thread, time::Duration};
-use log::{LevelFilter, info};
-use simple_logger::SimpleLogger;
-use serde::{Serialize, Deserialize};
-use gui::*;
 use connection::*;
+use gui::*;
+use log::{info, LevelFilter};
+use serde::{Deserialize, Serialize};
+use simple_logger::SimpleLogger;
+use std::{thread, time::Duration};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 enum MyId {
@@ -75,10 +75,7 @@ fn main() {
             // Left
             let mut stack = left.stacklayout();
             stack.header("The left side".to_owned());
-            stack
-                .button()
-                .handle(MyId::Button1)
-                .finish();
+            stack.button().handle(MyId::Button1).finish();
             stack
                 .button()
                 .handle(MyId::Button2)
@@ -95,13 +92,8 @@ fn main() {
             // Right
             let mut stack = right.stacklayout();
             stack.header("The right side".to_owned());
-            stack
-                .button()
-                .finish();
-            stack
-                .button()
-                .text("Button 4".to_owned())
-                .finish();
+            stack.button().finish();
+            stack.button().text("Button 4".to_owned()).finish();
             for i in 0..10 {
                 stack
                     .button()

@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::BTreeMap, fmt};
-use serde::{Serialize, Deserialize};
 
 pub trait Id: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy {
     fn to_string(&self) -> String;
@@ -70,7 +70,7 @@ impl<'gui> Gui {
                 next_id: 0,
                 root: None,
                 elements: BTreeMap::new(),
-            })
+            }),
         }
     }
 
@@ -88,26 +88,35 @@ impl<'gui> Gui {
             match rhs_state.elements.get(lhs_id) {
                 None => only_lhs.push(lhs_id.clone()),
                 Some(rhs_element) if rhs_element != lhs_element => unequal.push(lhs_id.clone()),
-                Some(_) => {},
+                Some(_) => {}
             }
         }
         for rhs_id in rhs_state.elements.keys() {
             match lhs_state.elements.get(rhs_id) {
                 None => only_rhs.push(rhs_id.clone()),
-                Some(_) => {},
+                Some(_) => {}
             }
         }
-        GuiDiff { only_lhs, only_rhs, unequal }
+        GuiDiff {
+            only_lhs,
+            only_rhs,
+            unequal,
+        }
     }
 
-    pub fn server_browser_update(previous_gui: Option<&Gui>, current_gui: &Gui) -> ServerBrowserUpdate {
+    pub fn server_browser_update(
+        previous_gui: Option<&Gui>,
+        current_gui: &Gui,
+    ) -> ServerBrowserUpdate {
         if let Some(previous_gui) = previous_gui {
             let diff = Gui::diff(previous_gui, &current_gui);
             // TODO: Code duplication
-            let added = diff.only_rhs
+            let added = diff
+                .only_rhs
                 .into_iter()
                 .map(|gui_id| {
-                    let element = current_gui.state
+                    let element = current_gui
+                        .state
                         .borrow()
                         .elements
                         .get(&gui_id)
@@ -116,10 +125,12 @@ impl<'gui> Gui {
                     (gui_id, element)
                 })
                 .collect();
-            let updated = diff.unequal
+            let updated = diff
+                .unequal
                 .into_iter()
                 .map(|gui_id| {
-                    let element = current_gui.state
+                    let element = current_gui
+                        .state
                         .borrow()
                         .elements
                         .get(&gui_id)
@@ -144,7 +155,8 @@ impl<'gui> Gui {
                 updated,
             }
         } else {
-            let added = current_gui.state
+            let added = current_gui
+                .state
                 .borrow()
                 .elements
                 .iter()
@@ -207,10 +219,10 @@ impl<'gui> Indeterminate<'gui> {
         *state
             .elements
             .get_mut(&self.target_id)
-            .expect("must be inserted") = Element::Columns { 
-                left: left.clone(), 
-                right: right.clone(),
-            };
+            .expect("must be inserted") = Element::Columns {
+            left: left.clone(),
+            right: right.clone(),
+        };
         (
             Indeterminate::new(self.state, left),
             Indeterminate::new(self.state, right),
@@ -268,7 +280,10 @@ impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
     }
 
     pub fn finish(self) {
-        let id = self.id.clone().unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
+        let id = self
+            .id
+            .clone()
+            .unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
         self.parent.push_element(id, Element::new_button(self.text));
     }
 }
@@ -287,7 +302,7 @@ pub trait PushElement: Sized {
         self.push_element(id, Element::Header(text.into()))
     }
 
-    fn label<T: ToString>(&mut self,value: T) {
+    fn label<T: ToString>(&mut self, value: T) {
         let id = self.gui().borrow_mut().fetch_id();
         self.push_element(id, Element::Label(value.to_string()))
     }
@@ -317,23 +332,14 @@ enum Element {
     Indeterminate,
     Header(String),
     Label(String),
-    Button {
-        text: Option<String>,
-    },
-    StackLayout {
-        children: Vec<GuiId>,
-    },
-    Columns {
-        left: GuiId,
-        right: GuiId,
-    },
+    Button { text: Option<String> },
+    StackLayout { children: Vec<GuiId> },
+    Columns { left: GuiId, right: GuiId },
 }
 
 impl Element {
     fn new_button(text: Option<String>) -> Element {
-        Element::Button { 
-            text,
-        }
+        Element::Button { text }
     }
 }
 
@@ -348,13 +354,15 @@ pub enum Event {
 
 #[derive(Debug, Deserialize)]
 pub enum BrowserServerEvent {
-    ButtonPressed(String)
+    ButtonPressed(String),
 }
 
 impl Event {
     pub fn from<I: Id>(event: BrowserServerEvent) -> Option<Self> {
         match event {
-            BrowserServerEvent::ButtonPressed(identifier) => GuiId::from_str::<I>(&identifier).map(|gui_id| Event::ButtonPressed(gui_id)),
+            BrowserServerEvent::ButtonPressed(identifier) => {
+                GuiId::from_str::<I>(&identifier).map(|gui_id| Event::ButtonPressed(gui_id))
+            }
         }
     }
 }
