@@ -71,7 +71,7 @@
 
             // Apply changes to the browsers VDom
             for (const gui_id in server_browser_update.removed) {
-                vdom.remove(gui_id)
+                delete vdom[gui_id]
             }
             for (const gui_id in server_browser_update.updated) {
                 vdom[gui_id] = server_browser_update.updated[gui_id]
@@ -225,7 +225,7 @@
 
             let left_gui_id = node.Columns.left
             let new_left_content = convert_to_dom(left_gui_id, vdom)
-            let left = dom_node.querySelector("#left")
+            let left = dom_node.firstChild;
             let left_content = left.firstChild
             if (left_content == null) {
                 left.appendChild(new_left_content)
@@ -235,7 +235,7 @@
 
             let right_gui_id = node.Columns.right
             let new_right_content = convert_to_dom(right_gui_id, vdom)
-            let right = dom_node.querySelector("#right")
+            let right = dom_node.lastChild
             let right_content = right.firstChild
             if (right_content == null) {
                 right.appendChild(new_right_content)

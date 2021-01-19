@@ -6,6 +6,7 @@ use gui::*;
 use log::{info, LevelFilter};
 use serde::{Deserialize, Serialize};
 use simple_logger::SimpleLogger;
+use tungstenite::http::version;
 use std::{thread, time::Duration};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
@@ -85,9 +86,19 @@ fn main() {
                 if (i + index) % 13 == 1 {
                     stack.button().text(format!("{}", i)).finish();
                 } else {
-                    stack.label(i ^ index);
+                    let (l, r) = stack.layout().vertical_panels();
+                    l.stacklayout().label(i ^ index);
+                    r.stacklayout().label("Hello World");
                 }
             }
+            let area51 = stack.layout();
+            let (lower_left, lower_right) = area51.vertical_panels();
+            let mut lower_left_stack = lower_left.stacklayout();
+            lower_left_stack.header("L");
+            lower_left_stack.button().finish();
+            let mut lower_right_stack = lower_right.stacklayout();
+            lower_right_stack.header("R");
+            lower_right_stack.button().finish();
 
             // Right
             let mut stack = right.stacklayout();
