@@ -4,30 +4,7 @@ use std::{cell::RefCell, collections::BTreeMap, fmt};
 macro_rules! impl_elements {
     ($name:ident) => {
         impl $name<'_> {
-            pub fn header<S: Into<String>>(&mut self, text: S) {
-                let id = self.gui().borrow_mut().fetch_id();
-                self.push_element(id, Element::Header(text.into()))
-            }
-        
-            pub fn label<T: ToString>(&mut self, value: T) {
-                let id = self.gui().borrow_mut().fetch_id();
-                self.push_element(id, Element::Label(value.to_string()))
-            }
-        
-            #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
-            pub fn button(&mut self) -> ButtonBuilder {
-                ButtonBuilder {
-                    parent: self,
-                    id: None,
-                    text: None,
-                }
-            }
-        
-            pub fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
-                let id = self.gui().borrow_mut().fetch_id();
-                self.push_element(id.clone(), Element::Indeterminate);
-                Indeterminate::new(self.gui(), id)
-            }
+
         }
     };
 }
@@ -248,6 +225,11 @@ pub struct StackLayout<'gui> {
     id: GuiId,
 }
 impl_elements!(StackLayout);
+impl<'gui> Elements for StackLayout<'gui> {
+    fn curve_ball(&mut self) -> CurveBall {
+        CurveBall { push_element: self }
+    }
+}
 
 impl PushElement for StackLayout<'_> {
     fn push_element(&mut self, id: GuiId, element: Element) {
@@ -302,9 +284,47 @@ impl<'parent> ButtonBuilder<'parent> {
 // traits
 // ----------------------------------------------------------------------------
 
+pub struct CurveBall<'p> {
+    push_element: &'p mut dyn PushElement,
+}
+
 trait PushElement {
     fn push_element(&mut self, id: GuiId, element: Element);
     fn gui(&mut self) -> &RefCell<GuiState>;
+}
+
+pub trait Elements {
+    #[doc(hidden)]
+    fn curve_ball(&mut self) -> CurveBall;
+
+    fn header<S: Into<String>>(&mut self, text: S) {
+        let e = self.curve_ball().push_element;
+        let id = e.gui().borrow_mut().fetch_id();
+        e.push_element(id, Element::Header(text.into()))
+    }
+
+    fn label<T: ToString>(&mut self, value: T) {
+        let e = self.curve_ball().push_element;
+        let id = e.gui().borrow_mut().fetch_id();
+        e.push_element(id, Element::Label(value.to_string()))
+    }
+
+    #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+    fn button(&mut self) -> ButtonBuilder {
+        let parent = self.curve_ball().push_element;
+        ButtonBuilder {
+            parent,
+            id: None,
+            text: None,
+        }
+    }
+
+    fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
+        let e = self.curve_ball().push_element;
+        let id = e.gui().borrow_mut().fetch_id();
+        e.push_element(id.clone(), Element::Indeterminate);
+        Indeterminate::new(e.gui(), id)
+    }
 }
 
 // ----------------------------------------------------------------------------
