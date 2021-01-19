@@ -1,6 +1,37 @@
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::BTreeMap, fmt};
 
+macro_rules! impl_elements {
+    ($name:ident) => {
+        impl $name<'_> {
+            pub fn header<S: Into<String>>(&mut self, text: S) {
+                let id = self.gui().borrow_mut().fetch_id();
+                self.push_element(id, Element::Header(text.into()))
+            }
+        
+            pub fn label<T: ToString>(&mut self, value: T) {
+                let id = self.gui().borrow_mut().fetch_id();
+                self.push_element(id, Element::Label(value.to_string()))
+            }
+        
+            #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+            pub fn button(&mut self) -> ButtonBuilder {
+                ButtonBuilder {
+                    parent: self,
+                    id: None,
+                    text: None,
+                }
+            }
+        
+            pub fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
+                let id = self.gui().borrow_mut().fetch_id();
+                self.push_element(id.clone(), Element::Indeterminate);
+                Indeterminate::new(self.gui(), id)
+            }
+        }
+    };
+}
+
 pub trait Id: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy {
     fn to_string(&self) -> String;
     // TODO: Maybe use Result with error message
@@ -216,6 +247,7 @@ pub struct StackLayout<'gui> {
     state: &'gui RefCell<GuiState>,
     id: GuiId,
 }
+impl_elements!(StackLayout);
 
 impl PushElement for StackLayout<'_> {
     fn push_element(&mut self, id: GuiId, element: Element) {
@@ -240,13 +272,13 @@ impl PushElement for StackLayout<'_> {
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
-pub struct ButtonBuilder<'parent, P: PushElement> {
-    parent: &'parent mut P,
+pub struct ButtonBuilder<'parent> {
+    parent: &'parent mut dyn PushElement,
     id: Option<GuiId>,
     text: Option<String>,
 }
 
-impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
+impl<'parent> ButtonBuilder<'parent> {
     pub fn text<S: Into<String>>(mut self, text: S) -> Self {
         self.text = Some(text.into());
         self
@@ -270,35 +302,9 @@ impl<'parent, P: PushElement> ButtonBuilder<'parent, P> {
 // traits
 // ----------------------------------------------------------------------------
 
-// TODO: Not all members should be public
-pub trait PushElement: Sized {
+trait PushElement {
     fn push_element(&mut self, id: GuiId, element: Element);
     fn gui(&mut self) -> &RefCell<GuiState>;
-
-    fn header<S: Into<String>>(&mut self, text: S) {
-        let id = self.gui().borrow_mut().fetch_id();
-        self.push_element(id, Element::Header(text.into()))
-    }
-
-    fn label<T: ToString>(&mut self, value: T) {
-        let id = self.gui().borrow_mut().fetch_id();
-        self.push_element(id, Element::Label(value.to_string()))
-    }
-
-    #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
-    fn button(&mut self) -> ButtonBuilder<Self> {
-        ButtonBuilder {
-            parent: self,
-            id: None,
-            text: None,
-        }
-    }
-
-    fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
-        let id = self.gui().borrow_mut().fetch_id();
-        self.push_element(id.clone(), Element::Indeterminate);
-        Indeterminate::new(self.gui(), id)
-    }
 }
 
 // ----------------------------------------------------------------------------
