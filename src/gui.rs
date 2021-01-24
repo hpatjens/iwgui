@@ -1,14 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::BTreeMap, fmt};
 
-macro_rules! impl_elements {
-    ($name:ident) => {
-        impl $name<'_> {
-
-        }
-    };
-}
-
 pub trait Id: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy {
     fn to_string(&self) -> String;
     // TODO: Maybe use Result with error message
@@ -224,7 +216,7 @@ pub struct StackLayout<'gui> {
     state: &'gui RefCell<GuiState>,
     id: GuiId,
 }
-impl_elements!(StackLayout);
+
 impl<'gui> Elements for StackLayout<'gui> {
     fn curve_ball(&mut self) -> CurveBall {
         CurveBall { push_element: self }
