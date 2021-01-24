@@ -6,7 +6,6 @@ use gui::*;
 use log::{info, LevelFilter};
 use serde::{Deserialize, Serialize};
 use simple_logger::SimpleLogger;
-use tungstenite::http::version;
 use std::{thread, time::Duration};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
@@ -90,9 +89,8 @@ fn main() {
                     l.stacklayout().label(i ^ index);
                     r.stacklayout()
                         .checkbox()
-                        .text("My Checkbox")
+                        .text(format!("{} Active", i + 1))
                         .finish();
-
                 }
             }
             let area51 = stack.layout();

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::BTreeMap, fmt, num::ParseIntError};
+use std::{cell::RefCell, collections::BTreeMap, fmt};
 
 macro_rules! impl_elements {
     ($name:ident) => {
@@ -280,6 +280,10 @@ impl<'parent> ButtonBuilder<'parent> {
     }
 }
 
+// ----------------------------------------------------------------------------
+// CheckboxBuilder
+// ----------------------------------------------------------------------------
+
 pub struct CheckboxBuilder<'parent> {
     parent: &'parent mut dyn PushElement,
     id: Option<GuiId>,
@@ -345,6 +349,7 @@ pub trait Elements {
         }
     }
 
+    #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
     fn checkbox(&mut self) -> CheckboxBuilder {
         let parent = self.curve_ball().push_element;
         CheckboxBuilder {
