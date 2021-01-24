@@ -88,7 +88,11 @@ fn main() {
                 } else {
                     let (l, r) = stack.layout().vertical_panels();
                     l.stacklayout().label(i ^ index);
-                    r.stacklayout().label("Hello World");
+                    r.stacklayout()
+                        .checkbox()
+                        .text("My Checkbox")
+                        .finish();
+
                 }
             }
             let area51 = stack.layout();

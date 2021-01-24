@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::BTreeMap, fmt};
+use std::{cell::RefCell, collections::BTreeMap, fmt, num::ParseIntError};
 
 macro_rules! impl_elements {
     ($name:ident) => {
@@ -280,6 +280,32 @@ impl<'parent> ButtonBuilder<'parent> {
     }
 }
 
+pub struct CheckboxBuilder<'parent> {
+    parent: &'parent mut dyn PushElement,
+    id: Option<GuiId>,
+    text: Option<String>,
+}
+
+impl<'parent> CheckboxBuilder<'parent> {
+    pub fn text<S: ToString>(mut self, text: S) -> Self {
+        self.text = Some(text.to_string());
+        self
+    }
+
+    pub fn handle<I: Id>(mut self, id: I) -> Self {
+        self.id = Some(GuiId::new_user(id));
+        self
+    }
+
+    pub fn finish(self) {
+        let id = self
+            .id
+            .clone()
+            .unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
+        self.parent.push_element(id, Element::new_checkbox(self.text));
+    }
+}
+
 // ----------------------------------------------------------------------------
 // traits
 // ----------------------------------------------------------------------------
@@ -319,6 +345,15 @@ pub trait Elements {
         }
     }
 
+    fn checkbox(&mut self) -> CheckboxBuilder {
+        let parent = self.curve_ball().push_element;
+        CheckboxBuilder {
+            parent,
+            id: None,
+            text: None,
+        }
+    }
+
     fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
         let e = self.curve_ball().push_element;
         let id = e.gui().borrow_mut().fetch_id();
@@ -337,6 +372,7 @@ enum Element {
     Header(String),
     Label(String),
     Button { text: Option<String> },
+    Checkbox { text: Option<String> },
     StackLayout { children: Vec<GuiId> },
     Columns { left: GuiId, right: GuiId },
 }
@@ -344,6 +380,10 @@ enum Element {
 impl Element {
     fn new_button(text: Option<String>) -> Element {
         Element::Button { text }
+    }
+
+    fn new_checkbox(text: Option<String>) -> Element {
+        Element::Checkbox { text }
     }
 }
 

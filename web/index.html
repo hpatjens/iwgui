@@ -136,6 +136,7 @@
                 "StackLayout": create_or_update_stack_layout,
                 "Columns": create_or_update_columns,
                 "Button": create_or_update_buttons,
+                "Checkbox": create_or_update_checkbox,
                 "Label": create_or_update_label,
                 "Header": create_or_update_header,
             }[type])
@@ -259,6 +260,30 @@
                     send_event({"Event":{"ButtonPressed":gui_id}})
                 });
                 return button
+            })
+            return dom_node
+        }
+        function create_or_update_checkbox(gui_id, vdom) {
+            let node = vdom[gui_id]
+            let dom_node = reuse_or_create(node, () => {
+                let checkbox = document.createElement("input")
+                checkbox.id = gui_id
+                checkbox.type = "checkbox"
+
+                if (node.Checkbox.text) {
+                    let label = document.createElement("label")
+                    label.for = gui_id
+                    label.innerHTML = node.Checkbox.text
+
+                    let container = document.createElement("div")
+                    container.appendChild(checkbox)
+                    container.appendChild(label)
+
+                    return container
+                } else {
+                    return checkbox
+                }
+                return container
             })
             return dom_node
         }
