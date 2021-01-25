@@ -1,8 +1,6 @@
-mod connection;
-mod gui;
 
-use connection::*;
-use gui::*;
+use iwgui::*;
+
 use log::{info, LevelFilter};
 use serde::{Deserialize, Serialize};
 use simple_logger::SimpleLogger;
