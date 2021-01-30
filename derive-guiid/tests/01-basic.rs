@@ -1,6 +1,7 @@
 use derive_guiid::GuiId;
+use iwgui::Id;
 
-#[derive(GuiId)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, GuiId)]
 enum MyId {
     Button1,
     Button2,
@@ -9,7 +10,14 @@ enum MyId {
 fn main() {}
 
 #[test]
-fn test1() {
+fn to_string() {
     assert_eq!(MyId::Button1.to_string(), "Button1");
     assert_eq!(MyId::Button2.to_string(), "Button2");
+}
+
+#[test]
+fn from_str() {
+    assert_eq!(MyId::from_str("Button1"), Some(MyId::Button1));
+    assert_eq!(MyId::from_str("Button2"), Some(MyId::Button2));
+    assert_eq!(MyId::from_str("Button3"), None);
 }

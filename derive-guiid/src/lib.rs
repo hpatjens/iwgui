@@ -10,13 +10,40 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let tokens = match input.data {
         Data::Enum(DataEnum{ variants, .. }) => {
             let ty_ident = input.ident;
+            let to_string_cases = variants
+                .iter()
+                .map(|variant| {
+                    let variant_ident = &variant.ident;
+                    let variant_ident_string = variant_ident.to_string();
+                    quote! {
+                        #ty_ident::#variant_ident => String::from(#variant_ident_string),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let from_str_cases = variants
+                .iter()
+                .map(|variant| {
+                    let variant_ident = &variant.ident;
+                    let variant_ident_string = variant_ident.to_string();
+                    quote! {
+                        #variant_ident_string => Some(#ty_ident::#variant_ident),
+                    }
+                })
+                .collect::<Vec<_>>();
+
             quote! {
                 impl iwgui::Id for #ty_ident {
                     fn to_string(&self) -> String {
-                        todo!()
+                        match self {
+                            #(#to_string_cases)*
+                        }
                     }
                     fn from_str(s: &str) -> Option<Self> {
-                        todo!()
+                        match s {
+                            #(#from_str_cases)*
+                            _ => None
+                        }
                     }
                 }
             }

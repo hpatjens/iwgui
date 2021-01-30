@@ -1,7 +1,8 @@
+use fxhash::hash64;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::BTreeMap, fmt};
 
-pub trait Id: fmt::Debug + Default + Sync + Send + Eq + Ord + Copy {
+pub trait Id: fmt::Debug + Sync + Send + Eq + Ord + Copy {
     fn to_string(&self) -> String;
     // TODO: Maybe use Result with error message
     fn from_str(s: &str) -> Option<Self>;
@@ -18,6 +19,10 @@ impl GuiId {
 
     fn new_user<I: Id>(id: I) -> Self {
         GuiId(format!("User.{}", id.to_string()))
+    }
+
+    fn new_handle<S: ToString>(handle_str: S) -> Self {
+        GuiId(handle_str.to_string())
     }
 
     // TODO: Maybe use Result with error message
@@ -38,7 +43,28 @@ impl GuiId {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Handle
+// ----------------------------------------------------------------------------
+
+pub trait Handle {
+    fn hash(&self) -> u64;
+}
+
+impl Handle for String {
+    fn hash(&self) -> u64 {
+        fxhash::hash64(&self.as_ptr())
+    }
+}
+
+
+
+// ----------------------------------------------------------------------------
+// GuiState
+// ----------------------------------------------------------------------------
+
 struct GuiState {
+    events: Vec<Event>,
     next_id: usize,
     root: Option<GuiId>,
     elements: BTreeMap<GuiId, Element>,
@@ -64,9 +90,10 @@ pub struct Gui {
 }
 
 impl<'gui> Gui {
-    pub fn empty() -> Self {
+    pub(crate) fn empty(events: Vec<Event>) -> Self {
         Self {
             state: RefCell::new(GuiState {
+                events,
                 next_id: 0,
                 root: None,
                 elements: BTreeMap::new(),
@@ -260,6 +287,11 @@ impl<'parent> ButtonBuilder<'parent> {
 
     pub fn handle<I: Id>(mut self, id: I) -> Self {
         self.id = Some(GuiId::new_user(id));
+        self
+    }
+
+    pub fn handle_ptr<H: Handle>(mut self, handle: &H) -> Self {
+        self.id = Some(GuiId::new_handle(handle.hash()));
         self
     }
 

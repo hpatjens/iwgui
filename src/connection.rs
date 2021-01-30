@@ -22,7 +22,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn events<I: Id>(&mut self) -> Vec<Event> {
+    pub fn gui<I: Id>(&mut self) -> Gui {
+        let events = self.events::<I>();
+        Gui::empty(events)
+    }
+
+    fn events<I: Id>(&mut self) -> Vec<Event> {
         let mut pending_events = self.pending_events.lock();
         mem::take(&mut *pending_events)
             .into_iter()

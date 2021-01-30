@@ -61,12 +61,7 @@ fn main() {
     let mut index = 0;
     loop {
         for connection in &mut server.connections() {
-            let events = connection.events::<MyId>();
-            for event in events {
-                info!("{:?}", event);
-            }
-
-            let mut gui = Gui::empty();
+            let mut gui = connection.gui::<MyId>();
             let root = gui.root();
             let (left, right) = root.vertical_panels();
 
