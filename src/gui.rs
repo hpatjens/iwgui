@@ -1,6 +1,7 @@
 use fxhash::hash64;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::BTreeMap, fmt, panic::Location};
+use log::warn;
 
 pub trait Id: fmt::Debug + Sync + Send + Eq + Ord + Copy {
     fn to_string(&self) -> String;
@@ -50,6 +51,21 @@ impl GuiId {
 // ----------------------------------------------------------------------------
 // Handle
 // ----------------------------------------------------------------------------
+
+pub struct PtrHandle(u64);
+
+impl PtrHandle {
+    #[track_caller]
+    pub fn new<T>(value: &T) -> Self {
+        Self(fxhash::hash64(&(value as *const T)))
+    }
+}
+
+impl Handle for PtrHandle {
+    fn hash(&self) -> u64 {
+        self.0
+    }
+}
 
 pub trait Handle {
     fn hash(&self) -> u64;
@@ -353,15 +369,17 @@ impl<'parent> ButtonBuilder<'parent> {
 // CheckboxBuilder
 // ----------------------------------------------------------------------------
 
-pub struct CheckboxBuilder<'parent> {
+pub struct CheckboxBuilder<'parent, 'value> {
+    value: &'value mut bool,
     parent: &'parent mut dyn PushElement,
     id: GuiId,
     text: Option<String>,
 }
 
-impl<'parent> CheckboxBuilder<'parent> {
-    fn new(parent: &'parent mut dyn PushElement, id: GuiId) -> Self {
+impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
+    fn new(parent: &'parent mut dyn PushElement, id: GuiId, value: &'value mut bool) -> Self {
         CheckboxBuilder {
+            value,
             parent,
             id,
             text: None,
@@ -388,7 +406,22 @@ impl<'parent> CheckboxBuilder<'parent> {
     }
 
     pub fn finish(self) {
-        self.parent.push_element(self.id, Element::new_checkbox(self.text));
+        let id = self.id;
+        self.parent.push_element(id.clone(), Element::new_checkbox(self.text));
+        let events = &mut self.parent.gui().borrow_mut().events;
+        let event = events.iter().find(|event| event.id == id);
+        let position = if let Some(event) = event {
+            match event.kind {
+                Kind::CheckboxChecked(value) => *self.value = value,
+                _ => warn!("wrong event for checkbox {:?}", event),
+            }
+            events.iter().position(|event| event.id == id)
+        } else {
+            None
+        };
+        if let Some(position) = position {
+            events.remove(position);
+        }
     }
 }
 
@@ -432,16 +465,16 @@ pub trait Elements {
     #[track_caller]
     fn button(&mut self) -> ButtonBuilder {
         let parent = self.curve_ball().push_element;
-        let id = GuiId::new_handle(handle_from_location(&Location::caller()));
+        let id = GuiId::new_handle(handle_from_location(Location::caller()));
         ButtonBuilder::new(parent, id)
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
     #[track_caller]
-    fn checkbox(&mut self) -> CheckboxBuilder {
+    fn checkbox<'value>(&mut self, value: &'value mut bool) -> CheckboxBuilder<'_, 'value> {
         let parent = self.curve_ball().push_element;
-        let id = GuiId::new_handle(handle_from_location(&Location::caller()));
-        CheckboxBuilder::new(parent, id)
+        let id = GuiId::new_handle(handle_from_location(Location::caller()));
+        CheckboxBuilder::new(parent, id, value)
     }
 
     fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
@@ -482,20 +515,37 @@ impl Element {
 // ----------------------------------------------------------------------------
 
 #[derive(Debug)]
+pub enum Kind {
+    None,
+    CheckboxChecked(bool),
+}
+
+#[derive(Debug)]
 pub struct Event {
     id: GuiId,
+    kind: Kind,
 }
 
 #[derive(Debug, Deserialize)]
 pub enum BrowserServerEvent {
     ButtonPressed(String),
+    CheckboxChecked(String, bool),
 }
 
 impl Event {
     pub fn from<I: Id>(event: BrowserServerEvent) -> Option<Self> {
         match event {
             BrowserServerEvent::ButtonPressed(identifier) => {
-                GuiId::from_str::<I>(&identifier).map(|gui_id| Event { id: gui_id })
+                GuiId::from_str::<I>(&identifier).map(|gui_id| Event { 
+                    id: gui_id,
+                    kind: Kind::None,
+                })
+            }
+            BrowserServerEvent::CheckboxChecked(identifier, state) => {
+                GuiId::from_str::<I>(&identifier).map(|gui_id| Event { 
+                    id: gui_id,
+                    kind: Kind::CheckboxChecked(state),
+                })
             }
         }
     }

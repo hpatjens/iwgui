@@ -269,6 +269,9 @@
                 let checkbox = document.createElement("input")
                 checkbox.id = gui_id
                 checkbox.type = "checkbox"
+                checkbox.addEventListener('change', (event) => {
+                    send_event({"Event":{"CheckboxChecked":[gui_id, checkbox.checked ? true : false]}})
+                })
 
                 if (node.Checkbox.text) {
                     let label = document.createElement("label")
