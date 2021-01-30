@@ -76,17 +76,13 @@ fn main() {
                 println!("Button 2");
             }
             for i in 0..40 {
-                if (i + index) % 13 == 1 {
-                    stack.button().text(format!("{}", i)).finish();
-                } else {
-                    let (l, r) = stack.layout().vertical_panels();
-                    l.stacklayout().label(i ^ index);
-                    r.stacklayout()
-                        .checkbox()
-                        .text(format!("{} Active", i + 1))
-                        .finish();
-                }
-            }
+                let (l, r) = stack.layout().vertical_panels();
+                l.stacklayout().label(i);
+                r.stacklayout()
+                    .checkbox()
+                    .text(format!("{} Active", i + 1))
+                    .finish();
+        }
             let area51 = stack.layout();
             let (lower_left, lower_right) = area51.vertical_panels();
             let mut lower_left_stack = lower_left.stacklayout();
