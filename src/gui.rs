@@ -316,8 +316,8 @@ impl<'parent> ButtonBuilder<'parent> {
         }
     }
 
-    pub fn text<S: Into<String>>(mut self, text: S) -> Self {
-        self.text = Some(text.into());
+    pub fn text<S: AsRef<str>>(mut self, text: S) -> Self {
+        self.text = Some(text.as_ref().to_string());
         self
     }
 
