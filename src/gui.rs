@@ -1,6 +1,6 @@
 use fxhash::hash64;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::BTreeMap, fmt};
+use std::{cell::RefCell, collections::BTreeMap, fmt, panic::Location};
 
 pub trait Id: fmt::Debug + Sync + Send + Eq + Ord + Copy {
     fn to_string(&self) -> String;
@@ -22,13 +22,15 @@ impl GuiId {
     }
 
     fn new_handle<S: ToString>(handle_str: S) -> Self {
-        GuiId(handle_str.to_string())
+        GuiId(format!("Handle.{}", handle_str.to_string()))
     }
 
     // TODO: Maybe use Result with error message
     fn from_str<I: Id>(s: &str) -> Option<Self> {
         const PREFIX_AUTO: &'static str = "Auto.";
         const PREFIX_USER: &'static str = "User.";
+        const PREFIX_HANDLE: &'static str = "Handle.";
+        dbg!(s);
         if s.starts_with(PREFIX_AUTO) {
             if let Ok(i) = s[PREFIX_AUTO.len()..].parse::<usize>() {
                 return Some(GuiId::new_auto(i));
@@ -38,6 +40,9 @@ impl GuiId {
             if let Some(id) = I::from_str(&s[PREFIX_USER.len()..]) {
                 return Some(GuiId::new_user(id));
             }
+        }
+        if s.starts_with(PREFIX_HANDLE) {
+            return Some(GuiId::new_handle(&s[PREFIX_HANDLE.len()..]))
         }
         None
     }
@@ -57,7 +62,11 @@ impl Handle for String {
     }
 }
 
-
+impl Handle for usize {
+    fn hash(&self) -> u64 {
+        fxhash::hash64(self)
+    }
+}
 
 // ----------------------------------------------------------------------------
 // GuiState
@@ -275,32 +284,44 @@ impl PushElement for StackLayout<'_> {
 
 pub struct ButtonBuilder<'parent> {
     parent: &'parent mut dyn PushElement,
-    id: Option<GuiId>,
+    id: GuiId,
     text: Option<String>,
 }
 
 impl<'parent> ButtonBuilder<'parent> {
+    fn new(parent: &'parent mut dyn PushElement, id: GuiId) -> Self {
+        ButtonBuilder {
+            parent, 
+            id,
+            text: None,
+        }
+    }
+
     pub fn text<S: Into<String>>(mut self, text: S) -> Self {
         self.text = Some(text.into());
         self
     }
 
-    pub fn handle<I: Id>(mut self, id: I) -> Self {
-        self.id = Some(GuiId::new_user(id));
+    #[track_caller]
+    pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
+        let caller_hash = handle_from_location(&Location::caller());
+        let handle_hash = handle.hash();
+        let handle = fxhash::hash64(&(caller_hash ^ handle_hash));
+        self.id = GuiId::new_handle(handle);
         self
     }
 
-    pub fn handle_ptr<H: Handle>(mut self, handle: &H) -> Self {
-        self.id = Some(GuiId::new_handle(handle.hash()));
-        self
-    }
-
-    pub fn finish(self) {
-        let id = self
-            .id
-            .clone()
-            .unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
-        self.parent.push_element(id, Element::new_button(self.text));
+    pub fn finish(self) -> bool {
+        let id = self.id;
+        self.parent.push_element(id.clone(), Element::new_button(self.text));
+        let events = &mut self.parent.gui().borrow_mut().events;
+        let position = events.iter().position(|event| event.id == id);
+        if let Some(position) = position {
+            events.remove(position);
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -347,6 +368,13 @@ trait PushElement {
     fn gui(&mut self) -> &RefCell<GuiState>;
 }
 
+fn handle_from_location(location: &Location) -> u64 {
+    let file = fxhash::hash64(location.file());
+    let line = fxhash::hash64(&location.line());
+    let column = fxhash::hash64(&location.column());
+    fxhash::hash64(&(file ^ line ^ column))
+}
+
 pub trait Elements {
     #[doc(hidden)]
     fn curve_ball(&mut self) -> CurveBall;
@@ -364,13 +392,11 @@ pub trait Elements {
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+    #[track_caller]
     fn button(&mut self) -> ButtonBuilder {
         let parent = self.curve_ball().push_element;
-        ButtonBuilder {
-            parent,
-            id: None,
-            text: None,
-        }
+        let id = GuiId::new_handle(handle_from_location(&Location::caller()));
+        ButtonBuilder::new(parent, id)
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
@@ -421,8 +447,8 @@ impl Element {
 // ----------------------------------------------------------------------------
 
 #[derive(Debug)]
-pub enum Event {
-    ButtonPressed(GuiId),
+pub struct Event {
+    id: GuiId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -434,7 +460,7 @@ impl Event {
     pub fn from<I: Id>(event: BrowserServerEvent) -> Option<Self> {
         match event {
             BrowserServerEvent::ButtonPressed(identifier) => {
-                GuiId::from_str::<I>(&identifier).map(|gui_id| Event::ButtonPressed(gui_id))
+                GuiId::from_str::<I>(&identifier).map(|gui_id| Event { id: gui_id })
             }
         }
     }

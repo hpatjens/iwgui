@@ -59,6 +59,7 @@ fn main() {
 
     let mut server = Server::new("127.0.0.1:8080");
     let mut index = 0;
+
     loop {
         for connection in &mut server.connections() {
             let mut gui = connection.gui::<MyId>();
@@ -68,12 +69,12 @@ fn main() {
             // Left
             let mut stack = left.stacklayout();
             stack.header("The left side".to_owned());
-            stack.button().handle(MyId::Button1).finish();
-            stack
-                .button()
-                .handle(MyId::Button2)
-                .text("Button 2".to_owned())
-                .finish();
+            if stack.button().finish() {
+                println!("Button Unnamed");
+            }
+            if stack.button().text("Button 2".to_owned()).finish() {
+                println!("Button 2");
+            }
             for i in 0..40 {
                 if (i + index) % 13 == 1 {
                     stack.button().text(format!("{}", i)).finish();
@@ -101,16 +102,13 @@ fn main() {
             stack.button().finish();
             stack.button().text("Button 4".to_owned()).finish();
             for i in 0..10 {
-                stack
-                    .button()
-                    .handle(MyId::RightButton(i))
-                    .text(format!("Button {}", i))
-                    .finish();
+                if stack.button().handle(&i).text(format!("Button {}", i)).finish() {
+                    println!("Button {}", i);
+                }
             }
             if index > 20 {
                 stack
                     .button()
-                    .handle(MyId::LateButton)
                     .text("Late button")
                     .finish();
             }
