@@ -51,6 +51,15 @@ impl Id for MyId {
     }
 }
 
+struct Duck {
+    name: String,
+    in_the_water: bool,
+}
+
+struct Model {
+    ducks_at_the_pont: Vec<Duck>,
+}
+
 fn main() {
     SimpleLogger::new()
         .with_module_level("tungstenite", LevelFilter::Warn)
@@ -60,6 +69,23 @@ fn main() {
     let mut server = Server::new("127.0.0.1:8080");
     let mut index = 0;
 
+    let model = Model {
+        ducks_at_the_pont: vec![
+            Duck {
+                name: String::from("Robin"),
+                in_the_water: false,
+            },
+            Duck {
+                name: String::from("Jenny"),
+                in_the_water: true,
+            },
+            Duck {
+                name: String::from("Melissa"),
+                in_the_water: false,
+            }
+        ],
+    };
+
     loop {
         for connection in &mut server.connections() {
             let mut gui = connection.gui::<MyId>();
@@ -68,19 +94,18 @@ fn main() {
 
             // Left
             let mut stack = left.stacklayout();
-            stack.header("The left side".to_owned());
-            if stack.button().finish() {
-                println!("Button Unnamed");
+            stack.header("Ducks at the Pont".to_owned());
+            stack.checkbox().text("Are we really doing this?").finish();
+            if stack.button().text("Stop").finish() {
+                println!("Stop");
             }
-            if stack.button().text("Button 2".to_owned()).finish() {
-                println!("Button 2");
-            }
-            for i in 0..40 {
+            for duck in &model.ducks_at_the_pont {
                 let (l, r) = stack.layout().vertical_panels();
-                l.stacklayout().label(i);
+                l.stacklayout().label(&duck.name);
                 r.stacklayout()
                     .checkbox()
-                    .text(format!("{} Active", i + 1))
+                    .handle_from_ptr(&*duck)
+                    .text("In the water")
                     .finish();
         }
             let area51 = stack.layout();

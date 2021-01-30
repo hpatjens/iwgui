@@ -30,7 +30,6 @@ impl GuiId {
         const PREFIX_AUTO: &'static str = "Auto.";
         const PREFIX_USER: &'static str = "User.";
         const PREFIX_HANDLE: &'static str = "Handle.";
-        dbg!(s);
         if s.starts_with(PREFIX_AUTO) {
             if let Ok(i) = s[PREFIX_AUTO.len()..].parse::<usize>() {
                 return Some(GuiId::new_auto(i));
@@ -54,6 +53,12 @@ impl GuiId {
 
 pub trait Handle {
     fn hash(&self) -> u64;
+}
+
+impl<T> Handle for *const T {
+    fn hash(&self) -> u64 {
+        fxhash::hash64(self)
+    }
 }
 
 impl Handle for String {
@@ -282,6 +287,20 @@ impl PushElement for StackLayout<'_> {
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
+fn manual_handle(location: &Location, handle: &impl Handle) -> GuiId {
+    let caller_hash = handle_from_location(location);
+    let handle_hash = handle.hash();
+    let handle = fxhash::hash64(&(caller_hash ^ handle_hash));
+    GuiId::new_handle(handle)
+}
+
+fn manual_handle_from_ptr<T>(location: &Location, value: &T) -> GuiId {
+    let caller_hash = handle_from_location(location);
+    let handle_hash = fxhash::hash64(&(value as *const T));
+    let handle = fxhash::hash64(&(caller_hash ^ handle_hash));
+    GuiId::new_handle(handle)
+}
+
 pub struct ButtonBuilder<'parent> {
     parent: &'parent mut dyn PushElement,
     id: GuiId,
@@ -302,12 +321,17 @@ impl<'parent> ButtonBuilder<'parent> {
         self
     }
 
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
     #[track_caller]
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
-        let caller_hash = handle_from_location(&Location::caller());
-        let handle_hash = handle.hash();
-        let handle = fxhash::hash64(&(caller_hash ^ handle_hash));
-        self.id = GuiId::new_handle(handle);
+        self.id = manual_handle(Location::caller(), handle);
+        self
+    }
+
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
+    #[track_caller]
+    pub fn handle_from_ptr<T>(mut self, value: &T) -> Self {
+        self.id = manual_handle_from_ptr(Location::caller(), value);
         self
     }
 
@@ -331,27 +355,40 @@ impl<'parent> ButtonBuilder<'parent> {
 
 pub struct CheckboxBuilder<'parent> {
     parent: &'parent mut dyn PushElement,
-    id: Option<GuiId>,
+    id: GuiId,
     text: Option<String>,
 }
 
 impl<'parent> CheckboxBuilder<'parent> {
+    fn new(parent: &'parent mut dyn PushElement, id: GuiId) -> Self {
+        CheckboxBuilder {
+            parent,
+            id,
+            text: None,
+        }
+    }
+
     pub fn text<S: ToString>(mut self, text: S) -> Self {
         self.text = Some(text.to_string());
         self
     }
 
-    pub fn handle<I: Id>(mut self, id: I) -> Self {
-        self.id = Some(GuiId::new_user(id));
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
+    #[track_caller]
+    pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
+        self.id = manual_handle(Location::caller(), handle);
+        self    
+    }
+
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
+    #[track_caller]
+    pub fn handle_from_ptr<T>(mut self, value: &T) -> Self {
+        self.id = manual_handle_from_ptr(Location::caller(), value);
         self
     }
 
     pub fn finish(self) {
-        let id = self
-            .id
-            .clone()
-            .unwrap_or_else(|| self.parent.gui().borrow_mut().fetch_id());
-        self.parent.push_element(id, Element::new_checkbox(self.text));
+        self.parent.push_element(self.id, Element::new_checkbox(self.text));
     }
 }
 
@@ -385,10 +422,10 @@ pub trait Elements {
         e.push_element(id, Element::Header(text.into()))
     }
 
-    fn label<T: ToString>(&mut self, value: T) {
+    fn label<T: AsRef<str>>(&mut self, value: T) {
         let e = self.curve_ball().push_element;
         let id = e.gui().borrow_mut().fetch_id();
-        e.push_element(id, Element::Label(value.to_string()))
+        e.push_element(id, Element::Label(value.as_ref().to_string()))
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
@@ -400,13 +437,11 @@ pub trait Elements {
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+    #[track_caller]
     fn checkbox(&mut self) -> CheckboxBuilder {
         let parent = self.curve_ball().push_element;
-        CheckboxBuilder {
-            parent,
-            id: None,
-            text: None,
-        }
+        let id = GuiId::new_handle(handle_from_location(&Location::caller()));
+        CheckboxBuilder::new(parent, id)
     }
 
     fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
