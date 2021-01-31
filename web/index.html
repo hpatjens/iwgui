@@ -70,14 +70,14 @@
             var server_browser_update = JSON.parse(event.data)
 
             // Apply changes to the browsers VDom
-            for (const gui_id in server_browser_update.removed) {
-                delete vdom[gui_id]
+            for (const handle_hash in server_browser_update.removed) {
+                delete vdom[handle_hash]
             }
-            for (const gui_id in server_browser_update.updated) {
-                vdom[gui_id] = server_browser_update.updated[gui_id]
+            for (const handle_hash in server_browser_update.updated) {
+                vdom[handle_hash] = server_browser_update.updated[handle_hash]
             }
-            for (const gui_id in server_browser_update.added) {
-                vdom[gui_id] = server_browser_update.added[gui_id]
+            for (const handle_hash in server_browser_update.added) {
+                vdom[handle_hash] = server_browser_update.added[handle_hash]
             }
 
 
@@ -128,9 +128,9 @@
             console.log(`[error] ${error.message}`)
         }
 
-        function convert_to_dom(gui_id, vdom) {
+        function convert_to_dom(handle_hash, vdom) {
             // Create a new dom node
-            let node = vdom[gui_id]
+            let node = vdom[handle_hash]
             let type = first_key(node)
             let create_or_update_function = ({
                 "StackLayout": create_or_update_stack_layout,
@@ -140,7 +140,7 @@
                 "Label": create_or_update_label,
                 "Header": create_or_update_header,
             }[type])
-            let dom_node = create_or_update_function(gui_id, vdom)
+            let dom_node = create_or_update_function(handle_hash, vdom)
             if (!dom_node) {
                 console.error({ errorMsg: "Unknown type of element", type: type })
                     return null
@@ -156,18 +156,18 @@
                 return node.dom_node
             }
         }
-        function create_or_update_stack_layout(gui_id, vdom) {
+        function create_or_update_stack_layout(handle_hash, vdom) {
             /* <div>{}</div> */
-            let node = vdom[gui_id]
+            let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
                 let dom_node = document.createElement("div")
-                dom_node.id = gui_id
+                dom_node.id = handle_hash
                 return dom_node
             })
 
             var index = 0
-            for (const child_gui_id of node.StackLayout.children) {
-                let new_child = convert_to_dom(child_gui_id, vdom)
+            for (const child_handle_hash of node.StackLayout.children) {
+                let new_child = convert_to_dom(child_handle_hash, vdom)
                 let child = dom_node.childNodes.item(index)
                 if (child == null) {
                     dom_node.appendChild(new_child)
@@ -179,22 +179,22 @@
 
             /*
             dom_node.innerHTML = ""
-            for (const child_gui_id of node.StackLayout.children) {
-                // let new_child = convert_to_dom(child_gui_id, vdom)
-                // let child = document.getElementById(gui_id)
+            for (const child_handle_hash of node.StackLayout.children) {
+                // let new_child = convert_to_dom(child_handle_hash, vdom)
+                // let child = document.getElementById(handle_hash)
                 // if (child == null) {
                 //     dom_node.appendChild(new_child)
                 // } else if (child != new_child) {
                 //     child.replaceWith(new_child)
                 // }
-                let child = convert_to_dom(child_gui_id, vdom)
+                let child = convert_to_dom(child_handle_hash, vdom)
                 dom_node.appendChild(child)
             }
             */
             // TODO: Remove children that were not hit
             return dom_node
         }
-        function create_or_update_columns(gui_id, vdom) {
+        function create_or_update_columns(handle_hash, vdom) {
             // TODO: Cleanup this stuff
             /*
             <div class="row">
@@ -202,11 +202,11 @@
                 <div class="column">{}</div>
             </div>
             */
-            let node = vdom[gui_id]
+            let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
                 // Parent
                 let columns = document.createElement("div")
-                columns.id = gui_id
+                columns.id = handle_hash
                 columns.classList.add("row")
 
                 // Left child
@@ -224,8 +224,8 @@
                 return columns
             })
 
-            let left_gui_id = node.Columns.left
-            let new_left_content = convert_to_dom(left_gui_id, vdom)
+            let left_handle_hash = node.Columns.left
+            let new_left_content = convert_to_dom(left_handle_hash, vdom)
             let left = dom_node.firstChild;
             let left_content = left.firstChild
             if (left_content == null) {
@@ -234,8 +234,8 @@
                 left_content.replaceWith(new_left_content)
             }
 
-            let right_gui_id = node.Columns.right
-            let new_right_content = convert_to_dom(right_gui_id, vdom)
+            let right_handle_hash = node.Columns.right
+            let new_right_content = convert_to_dom(right_handle_hash, vdom)
             let right = dom_node.lastChild
             let right_content = right.firstChild
             if (right_content == null) {
@@ -246,36 +246,36 @@
 
             return dom_node
         }
-        function create_or_update_buttons(gui_id, vdom) {
-            let node = vdom[gui_id]
+        function create_or_update_buttons(handle_hash, vdom) {
+            let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
                 let button = document.createElement("button")
-                button.id = gui_id
+                button.id = handle_hash
                 if (node.Button.text) {
                     button.innerHTML = node.Button.text
                 } else {
                     button.innerHTML = "Button"
                 }
                 button.addEventListener ("click", function() {
-                    send_event({"Event":{"ButtonPressed":gui_id}})
+                    send_event({"Event":{"ButtonPressed":handle_hash}})
                 });
                 return button
             })
             return dom_node
         }
-        function create_or_update_checkbox(gui_id, vdom) {
-            let node = vdom[gui_id]
+        function create_or_update_checkbox(handle_hash, vdom) {
+            let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
                 let checkbox = document.createElement("input")
-                checkbox.id = gui_id
+                checkbox.id = handle_hash
                 checkbox.type = "checkbox"
                 checkbox.addEventListener('change', (event) => {
-                    send_event({"Event":{"CheckboxChecked":[gui_id, checkbox.checked ? true : false]}})
+                    send_event({"Event":{"CheckboxChecked":[handle_hash, checkbox.checked ? true : false]}})
                 })
 
                 if (node.Checkbox.text) {
                     let label = document.createElement("label")
-                    label.for = gui_id
+                    label.for = handle_hash
                     label.innerHTML = node.Checkbox.text
 
                     let container = document.createElement("div")
@@ -290,21 +290,21 @@
             })
             return dom_node
         }
-        function create_or_update_label(gui_id, vdom) {
-            let node = vdom[gui_id]
+        function create_or_update_label(handle_hash, vdom) {
+            let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
                 let label = document.createElement("div")
-                label.id = gui_id
+                label.id = handle_hash
                 label.innerHTML = node.Label
                 return label
             })
             return dom_node
         }
-        function create_or_update_header(gui_id, vdom) {
-            let node = vdom[gui_id]
+        function create_or_update_header(handle_hash, vdom) {
+            let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
                 let header = document.createElement("h1")
-                header.id = gui_id
+                header.id = handle_hash
                 header.innerHTML = node.Header
                 return header
             })

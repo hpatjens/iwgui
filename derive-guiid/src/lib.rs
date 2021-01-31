@@ -3,7 +3,7 @@ use quote::quote;
 use syn::{Data, DataEnum, Fields, Attribute, parse_macro_input, DeriveInput};
 use syn::spanned::Spanned;
 
-// #[proc_macro_derive(GuiId, attributes(gui_id))]
+// #[proc_macro_derive(GuiId, attributes(handle_hash))]
 #[proc_macro_derive(GuiId)]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

@@ -12,7 +12,7 @@ use tungstenite::{error::Error, Message, WebSocket};
 use uuid::Uuid;
 use parking_lot::{Mutex, MutexGuard};
 
-use crate::gui::{BrowserServerEvent, Event, Gui, Id};
+use crate::gui::{BrowserServerEvent, Event, Gui};
 
 pub struct Connection {
     uuid: Uuid,
@@ -22,16 +22,16 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn gui<I: Id>(&mut self) -> Gui {
-        let events = self.events::<I>();
+    pub fn gui(&mut self) -> Gui {
+        let events = self.events();
         Gui::empty(events)
     }
 
-    fn events<I: Id>(&mut self) -> Vec<Event> {
+    fn events(&mut self) -> Vec<Event> {
         let mut pending_events = self.pending_events.lock();
         mem::take(&mut *pending_events)
             .into_iter()
-            .map(|event| Event::from::<I>(event).unwrap()) // TODO: unwrap
+            .map(|event| Event::from(event).unwrap()) // TODO: unwrap
             .collect()
     }
 

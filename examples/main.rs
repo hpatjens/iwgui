@@ -1,55 +1,9 @@
 
 use iwgui::*;
 
-use log::{info, LevelFilter};
-use serde::{Deserialize, Serialize};
+use log::LevelFilter;
 use simple_logger::SimpleLogger;
 use std::{thread, time::Duration};
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
-enum MyId {
-    Any,
-    Button1,
-    Button2,
-    RightButton(usize),
-    LateButton,
-}
-
-impl Default for MyId {
-    fn default() -> Self {
-        MyId::Any
-    }
-}
-impl Id for MyId {
-    fn to_string(&self) -> String {
-        match self {
-            MyId::Any => String::from("Any"),
-            MyId::Button1 => String::from("Button1"),
-            MyId::Button2 => String::from("Button2"),
-            MyId::RightButton(i) => format!("RightButton.{}", i),
-            MyId::LateButton => String::from("LateButton"),
-        }
-    }
-
-    // TODO: Maybe use Result with error message
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "Any" => Some(MyId::Any),
-            "Button1" => Some(MyId::Button1),
-            "Button2" => Some(MyId::Button2),
-            "LateButton" => Some(MyId::LateButton),
-            s => {
-                const PREFIX: &'static str = "RightButton.";
-                if s.starts_with(PREFIX) {
-                    if let Ok(i) = s[PREFIX.len()..].parse::<usize>() {
-                        return Some(MyId::RightButton(i));
-                    }
-                }
-                None
-            }
-        }
-    }
-}
 
 struct Duck {
     name: String,
@@ -94,7 +48,7 @@ fn main() {
 
     loop {
         for connection in &mut server.connections() {
-            let mut gui = connection.gui::<MyId>();
+            let mut gui = connection.gui();
             let root = gui.root();
             let (left, right) = root.vertical_panels();
 
@@ -117,12 +71,18 @@ fn ducks(left: Indeterminate, ducks_at_the_pont: &mut Vec<Duck>) {
         println!("Waving arms like a lunatic");
     }
     for duck in ducks_at_the_pont {
-        let (l, r) = stack.layout().vertical_panels();
-        l.stacklayout().label(format!("{} = {}", &duck.name, duck.in_the_water));
-        let checkbox_handle = PtrHandle::new(duck);
+        let (l, r) = stack
+            .layout()
+            //.tie_to(&PtrHandle::new(duck))
+            .vertical_panels();
+        l.stacklayout()
+            .label(format!("{} = {}", &duck.name, duck.in_the_water))
+            .handle(&PtrHandle::new(duck))
+            .finish();
+        let handle = PtrHandle::new(duck);
         r.stacklayout()
             .checkbox(&mut duck.in_the_water)
-            .handle(&checkbox_handle)
+            .handle(&handle)
             .text("In the water")
             .finish();
     }
@@ -145,8 +105,8 @@ fn paper_planes(right: Indeterminate, paper_planes: &mut Vec<PaperPlane>) {
     if stack.button().text("New Paper Plane").finish() {
         paper_planes.push(PaperPlane { paper_size: 1 });
     }
-    for (index, paper_plane) in paper_planes.iter().enumerate() {
-        stack.label(format!("Plane {}", index));
+    for (index, _paper_plane) in paper_planes.iter().enumerate() {
+        stack.label(format!("Plane {}", index)).handle(&index).finish();
     }
 }
 

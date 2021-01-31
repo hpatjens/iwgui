@@ -1,50 +1,38 @@
-use fxhash::hash64;
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::BTreeMap, fmt, panic::Location};
+use std::{cell::RefCell, collections::BTreeMap, panic::Location};
 use log::warn;
 
-pub trait Id: fmt::Debug + Sync + Send + Eq + Ord + Copy {
-    fn to_string(&self) -> String;
-    // TODO: Maybe use Result with error message
-    fn from_str(s: &str) -> Option<Self>;
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct GuiId(String);
+pub struct HandleHash(u32);
 
-impl GuiId {
-    fn new_auto(i: usize) -> Self {
-        GuiId(format!("Auto.{}", i))
+impl HandleHash {
+    fn from_location(location: &Location) -> Self {
+        // TODO: Think about this
+        let file = fxhash::hash32(location.file());
+        let line = fxhash::hash32(&location.line());
+        let column = fxhash::hash32(&location.column());
+        let hash = fxhash::hash32(&(file ^ line ^ column));
+        HandleHash(hash)
     }
 
-    fn new_user<I: Id>(id: I) -> Self {
-        GuiId(format!("User.{}", id.to_string()))
+    #[track_caller]
+    fn from_caller() -> Self {
+        Self::from_location(Location::caller())
     }
 
-    fn new_handle<S: ToString>(handle_str: S) -> Self {
-        GuiId(format!("Handle.{}", handle_str.to_string()))
+    fn from_str<S: AsRef<str>>(s: S) -> Self {
+        HandleHash(fxhash::hash32(s.as_ref()))
     }
 
-    // TODO: Maybe use Result with error message
-    fn from_str<I: Id>(s: &str) -> Option<Self> {
-        const PREFIX_AUTO: &'static str = "Auto.";
-        const PREFIX_USER: &'static str = "User.";
-        const PREFIX_HANDLE: &'static str = "Handle.";
-        if s.starts_with(PREFIX_AUTO) {
-            if let Ok(i) = s[PREFIX_AUTO.len()..].parse::<usize>() {
-                return Some(GuiId::new_auto(i));
-            }
-        }
-        if s.starts_with(PREFIX_USER) {
-            if let Some(id) = I::from_str(&s[PREFIX_USER.len()..]) {
-                return Some(GuiId::new_user(id));
-            }
-        }
-        if s.starts_with(PREFIX_HANDLE) {
-            return Some(GuiId::new_handle(&s[PREFIX_HANDLE.len()..]))
-        }
-        None
+    #[inline]
+    fn combine(h1: Self, h2: Self) -> HandleHash {
+        HandleHash(fxhash::hash32(&(h1.0 ^ h2.0)))
+    }
+
+    #[inline]
+    fn combine3(h1: Self, h2: Self, h3: Self) -> HandleHash {
+        HandleHash(fxhash::hash32(&(h1.0 ^ h2.0 ^ h3.0)))
     }
 }
 
@@ -52,40 +40,40 @@ impl GuiId {
 // Handle
 // ----------------------------------------------------------------------------
 
-pub struct PtrHandle(u64);
+pub struct PtrHandle(u32);
 
 impl PtrHandle {
     #[track_caller]
     pub fn new<T>(value: &T) -> Self {
-        Self(fxhash::hash64(&(value as *const T)))
+        Self(fxhash::hash32(&(value as *const T)))
     }
 }
 
 impl Handle for PtrHandle {
-    fn hash(&self) -> u64 {
-        self.0
+    fn hash(&self) -> HandleHash {
+        HandleHash(self.0)
     }
 }
 
 pub trait Handle {
-    fn hash(&self) -> u64;
+    fn hash(&self) -> HandleHash;
 }
 
 impl<T> Handle for *const T {
-    fn hash(&self) -> u64 {
-        fxhash::hash64(self)
+    fn hash(&self) -> HandleHash {
+        HandleHash(fxhash::hash32(self))
     }
 }
 
 impl Handle for String {
-    fn hash(&self) -> u64 {
-        fxhash::hash64(&self.as_ptr())
+    fn hash(&self) -> HandleHash {
+        HandleHash(fxhash::hash32(&self.as_ptr()))
     }
 }
 
 impl Handle for usize {
-    fn hash(&self) -> u64 {
-        fxhash::hash64(self)
+    fn hash(&self) -> HandleHash {
+        HandleHash(fxhash::hash32(self))
     }
 }
 
@@ -93,16 +81,17 @@ impl Handle for usize {
 // GuiState
 // ----------------------------------------------------------------------------
 
+#[derive(Debug)]
 struct GuiState {
     events: Vec<Event>,
     next_id: usize,
-    root: Option<GuiId>,
-    elements: BTreeMap<GuiId, Element>,
+    root: Option<HandleHash>,
+    elements: BTreeMap<HandleHash, Element>,
 }
 
 impl GuiState {
-    fn fetch_id(&mut self) -> GuiId {
-        let result = GuiId::new_auto(self.next_id);
+    fn fetch_id(&mut self) -> usize {
+        let result = self.next_id;
         self.next_id += 1;
         result
     }
@@ -110,11 +99,12 @@ impl GuiState {
 
 #[derive(Debug)]
 pub struct GuiDiff {
-    pub only_lhs: Vec<GuiId>,
-    pub only_rhs: Vec<GuiId>,
-    pub unequal: Vec<GuiId>,
+    pub only_lhs: Vec<HandleHash>,
+    pub only_rhs: Vec<HandleHash>,
+    pub unequal: Vec<HandleHash>,
 }
 
+#[derive(Debug)]
 pub struct Gui {
     state: RefCell<GuiState>,
 }
@@ -167,18 +157,18 @@ impl<'gui> Gui {
     ) -> ServerBrowserUpdate {
         if let Some(previous_gui) = previous_gui {
             let diff = Gui::diff(previous_gui, &current_gui);
-            fn to_tuples(gui_ids: Vec<GuiId>, gui: &Gui) -> BTreeMap<GuiId, Element> {
-                gui_ids
+            fn to_tuples(handle_hashes: Vec<HandleHash>, gui: &Gui) -> BTreeMap<HandleHash, Element> {
+                handle_hashes
                     .into_iter()
-                    .map(|gui_id| {
+                    .map(|handle_hash| {
                         let element = gui
                             .state
                             .borrow()
                             .elements
-                            .get(&gui_id)
+                            .get(&handle_hash)
                             .expect("must be available when in diff")
                             .clone();
-                        (gui_id, element)
+                        (handle_hash, element)
                     })
                     .collect()
             }
@@ -207,12 +197,15 @@ impl<'gui> Gui {
     }
 
     // TODO: Ensure that this works when called multiple times
+    #[track_caller]
     pub fn root(&'gui mut self) -> Indeterminate<'gui> {
         let mut state = self.state.borrow_mut();
-        let id = state.fetch_id();
-        state.elements.insert(id.clone(), Element::Indeterminate);
-        state.root = Some(id.clone());
-        Indeterminate::new(&self.state, id)
+        // TODO: Move handle functions into one place
+        // TODO: Integrate the hash from the parent
+        let handle_hash = HandleHash::from_caller(); 
+        state.elements.insert(handle_hash, Element::Indeterminate);
+        state.root = Some(handle_hash.clone());
+        Indeterminate::new(&self.state, handle_hash)
     }
 }
 
@@ -222,12 +215,12 @@ impl<'gui> Gui {
 
 pub struct Indeterminate<'gui> {
     state: &'gui RefCell<GuiState>,
-    target_id: GuiId,
+    handle_hash: HandleHash, // `Element` will be changed when the type of the `Indeterminate` is determined
 }
 
 impl<'gui> Indeterminate<'gui> {
-    fn new(state: &'gui RefCell<GuiState>, target_id: GuiId) -> Self {
-        Self { state, target_id }
+    fn new(state: &'gui RefCell<GuiState>, handle_hash: HandleHash) -> Self {
+        Self { state, handle_hash }
     }
 
     pub fn stacklayout(self) -> StackLayout<'gui> {
@@ -237,31 +230,29 @@ impl<'gui> Indeterminate<'gui> {
         };
         *state
             .elements
-            .get_mut(&self.target_id)
+            .get_mut(&self.handle_hash)
             .expect("must be inserted") = element;
         StackLayout {
             state: self.state,
-            id: self.target_id,
+            id: self.handle_hash,
         }
     }
 
     pub fn vertical_panels(self) -> (Indeterminate<'gui>, Indeterminate<'gui>) {
         let mut state = self.state.borrow_mut();
-        let left = state.fetch_id();
-        let right = state.fetch_id();
-        state.elements.insert(left.clone(), Element::Indeterminate);
-        state.elements.insert(right.clone(), Element::Indeterminate);
-        *state
-            .elements
-            .get_mut(&self.target_id)
-            .expect("must be inserted") = Element::Columns {
-            left: left.clone(),
-            right: right.clone(),
-        };
-        (
-            Indeterminate::new(self.state, left),
-            Indeterminate::new(self.state, right),
-        )
+        let left_hash = HandleHash::combine(
+            self.handle_hash, 
+            HandleHash::from_str(format!("left{}", state.fetch_id())));
+        let right_hash = HandleHash::combine(
+            self.handle_hash, 
+            HandleHash::from_str(format!("right{}", state.fetch_id())));
+        state.elements.insert(left_hash, Element::Indeterminate);
+        state.elements.insert(right_hash, Element::Indeterminate);
+        let target = state.elements.get_mut(&self.handle_hash).expect("must be inserted");
+        *target = Element::Columns { left: left_hash, right: right_hash };
+        let left = Indeterminate::new(self.state, left_hash);
+        let right = Indeterminate::new(self.state, right_hash);
+        (left, right)
     }
 }
 
@@ -271,7 +262,7 @@ impl<'gui> Indeterminate<'gui> {
 
 pub struct StackLayout<'gui> {
     state: &'gui RefCell<GuiState>,
-    id: GuiId,
+    id: HandleHash,
 }
 
 impl<'gui> Elements for StackLayout<'gui> {
@@ -281,7 +272,7 @@ impl<'gui> Elements for StackLayout<'gui> {
 }
 
 impl PushElement for StackLayout<'_> {
-    fn push_element(&mut self, id: GuiId, element: Element) {
+    fn push_element(&mut self, id: HandleHash, element: Element) {
         let mut state = self.state.borrow_mut();
         state.elements.insert(id.clone(), element);
         let stacklayout = state
@@ -297,34 +288,59 @@ impl PushElement for StackLayout<'_> {
     fn gui(&mut self) -> &RefCell<GuiState> {
         self.state
     }
+
+    fn handle_hash(&self) -> HandleHash {
+        self.id
+    }
+}
+
+// ----------------------------------------------------------------------------
+// LabelBuilder
+// ----------------------------------------------------------------------------
+
+pub struct LabelBuilder<'parent> {
+    parent: &'parent mut dyn PushElement,
+    id: HandleHash,
+    text: String,
+}
+
+impl<'parent> LabelBuilder<'parent> {
+    fn new(parent: &'parent mut dyn PushElement, id: HandleHash, text: String) -> Self {
+        LabelBuilder {
+            parent, 
+            id,
+            text,
+        }
+    }
+
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
+    #[track_caller]
+    pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
+        self.id = manual_handle(Location::caller(), handle);
+        self
+    }
+
+    pub fn finish(self) {
+        self.parent.push_element(self.id, Element::Label(self.text));
+    }
 }
 
 // ----------------------------------------------------------------------------
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
-fn manual_handle(location: &Location, handle: &impl Handle) -> GuiId {
-    let caller_hash = handle_from_location(location);
-    let handle_hash = handle.hash();
-    let handle = fxhash::hash64(&(caller_hash ^ handle_hash));
-    GuiId::new_handle(handle)
-}
-
-fn manual_handle_from_ptr<T>(location: &Location, value: &T) -> GuiId {
-    let caller_hash = handle_from_location(location);
-    let handle_hash = fxhash::hash64(&(value as *const T));
-    let handle = fxhash::hash64(&(caller_hash ^ handle_hash));
-    GuiId::new_handle(handle)
+fn manual_handle(location: &Location, handle: &impl Handle) -> HandleHash {
+    HandleHash::combine(HandleHash::from_location(location), handle.hash())
 }
 
 pub struct ButtonBuilder<'parent> {
     parent: &'parent mut dyn PushElement,
-    id: GuiId,
+    id: HandleHash,
     text: Option<String>,
 }
 
 impl<'parent> ButtonBuilder<'parent> {
-    fn new(parent: &'parent mut dyn PushElement, id: GuiId) -> Self {
+    fn new(parent: &'parent mut dyn PushElement, id: HandleHash) -> Self {
         ButtonBuilder {
             parent, 
             id,
@@ -341,13 +357,6 @@ impl<'parent> ButtonBuilder<'parent> {
     #[track_caller]
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
         self.id = manual_handle(Location::caller(), handle);
-        self
-    }
-
-    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
-    #[track_caller]
-    pub fn handle_from_ptr<T>(mut self, value: &T) -> Self {
-        self.id = manual_handle_from_ptr(Location::caller(), value);
         self
     }
 
@@ -372,12 +381,12 @@ impl<'parent> ButtonBuilder<'parent> {
 pub struct CheckboxBuilder<'parent, 'value> {
     value: &'value mut bool,
     parent: &'parent mut dyn PushElement,
-    id: GuiId,
+    id: HandleHash,
     text: Option<String>,
 }
 
 impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
-    fn new(parent: &'parent mut dyn PushElement, id: GuiId, value: &'value mut bool) -> Self {
+    fn new(parent: &'parent mut dyn PushElement, id: HandleHash, value: &'value mut bool) -> Self {
         CheckboxBuilder {
             value,
             parent,
@@ -396,13 +405,6 @@ impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
         self.id = manual_handle(Location::caller(), handle);
         self    
-    }
-
-    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
-    #[track_caller]
-    pub fn handle_from_ptr<T>(mut self, value: &T) -> Self {
-        self.id = manual_handle_from_ptr(Location::caller(), value);
-        self
     }
 
     pub fn finish(self) {
@@ -434,38 +436,35 @@ pub struct CurveBall<'p> {
 }
 
 trait PushElement {
-    fn push_element(&mut self, id: GuiId, element: Element);
+    fn push_element(&mut self, id: HandleHash, element: Element);
+    fn handle_hash(&self) -> HandleHash;
     fn gui(&mut self) -> &RefCell<GuiState>;
-}
-
-fn handle_from_location(location: &Location) -> u64 {
-    let file = fxhash::hash64(location.file());
-    let line = fxhash::hash64(&location.line());
-    let column = fxhash::hash64(&location.column());
-    fxhash::hash64(&(file ^ line ^ column))
 }
 
 pub trait Elements {
     #[doc(hidden)]
     fn curve_ball(&mut self) -> CurveBall;
 
+    #[track_caller]
     fn header<S: Into<String>>(&mut self, text: S) {
         let e = self.curve_ball().push_element;
-        let id = e.gui().borrow_mut().fetch_id();
+        let id = HandleHash::from_caller();
         e.push_element(id, Element::Header(text.into()))
     }
 
-    fn label<T: AsRef<str>>(&mut self, value: T) {
-        let e = self.curve_ball().push_element;
-        let id = e.gui().borrow_mut().fetch_id();
-        e.push_element(id, Element::Label(value.as_ref().to_string()))
+    #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+    #[track_caller]
+    fn label<T: AsRef<str>>(&mut self, text: T) -> LabelBuilder {
+        let parent = self.curve_ball().push_element;
+        let id = HandleHash::from_caller();
+        LabelBuilder::new(parent, id, text.as_ref().to_string())
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
     #[track_caller]
     fn button(&mut self) -> ButtonBuilder {
         let parent = self.curve_ball().push_element;
-        let id = GuiId::new_handle(handle_from_location(Location::caller()));
+        let id = HandleHash::from_caller();
         ButtonBuilder::new(parent, id)
     }
 
@@ -473,15 +472,18 @@ pub trait Elements {
     #[track_caller]
     fn checkbox<'value>(&mut self, value: &'value mut bool) -> CheckboxBuilder<'_, 'value> {
         let parent = self.curve_ball().push_element;
-        let id = GuiId::new_handle(handle_from_location(Location::caller()));
+        let id = HandleHash::from_caller();
         CheckboxBuilder::new(parent, id, value)
     }
 
+    #[track_caller]
     fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
         let e = self.curve_ball().push_element;
-        let id = e.gui().borrow_mut().fetch_id();
-        e.push_element(id.clone(), Element::Indeterminate);
-        Indeterminate::new(e.gui(), id)
+        let handle_hash = HandleHash::combine(
+            HandleHash::from_caller(), 
+            HandleHash::from_str(e.gui().borrow_mut().fetch_id().to_string()));
+        e.push_element(handle_hash, Element::Indeterminate);
+        Indeterminate::new(e.gui(), handle_hash)
     }
 }
 
@@ -496,8 +498,8 @@ enum Element {
     Label(String),
     Button { text: Option<String> },
     Checkbox { text: Option<String> },
-    StackLayout { children: Vec<GuiId> },
-    Columns { left: GuiId, right: GuiId },
+    StackLayout { children: Vec<HandleHash> },
+    Columns { left: HandleHash, right: HandleHash },
 }
 
 impl Element {
@@ -522,28 +524,28 @@ pub enum Kind {
 
 #[derive(Debug)]
 pub struct Event {
-    id: GuiId,
+    id: HandleHash,
     kind: Kind,
 }
 
 #[derive(Debug, Deserialize)]
 pub enum BrowserServerEvent {
-    ButtonPressed(String),
-    CheckboxChecked(String, bool),
+    ButtonPressed(HandleHash),
+    CheckboxChecked(HandleHash, bool),
 }
 
 impl Event {
-    pub fn from<I: Id>(event: BrowserServerEvent) -> Option<Self> {
+    pub fn from(event: BrowserServerEvent) -> Option<Self> {
         match event {
-            BrowserServerEvent::ButtonPressed(identifier) => {
-                GuiId::from_str::<I>(&identifier).map(|gui_id| Event { 
-                    id: gui_id,
+            BrowserServerEvent::ButtonPressed(handle_hash) => {
+                Some(Event { 
+                    id: handle_hash,
                     kind: Kind::None,
                 })
             }
-            BrowserServerEvent::CheckboxChecked(identifier, state) => {
-                GuiId::from_str::<I>(&identifier).map(|gui_id| Event { 
-                    id: gui_id,
+            BrowserServerEvent::CheckboxChecked(handle_hash, state) => {
+                Some(Event { 
+                    id: handle_hash,
                     kind: Kind::CheckboxChecked(state),
                 })
             }
@@ -556,10 +558,10 @@ impl Event {
 #[serde(transparent)]
 struct JsonString(String);
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ServerBrowserUpdate {
-    root: Option<GuiId>,
-    added: BTreeMap<GuiId, Element>, // key must be String for serde_json
-    removed: Vec<GuiId>,
-    updated: BTreeMap<GuiId, Element>, // key must be String for serde_json
+    root: Option<HandleHash>,
+    added: BTreeMap<HandleHash, Element>, // key must be String for serde_json
+    removed: Vec<HandleHash>,
+    updated: BTreeMap<HandleHash, Element>, // key must be String for serde_json
 }
