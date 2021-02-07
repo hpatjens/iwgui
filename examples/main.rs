@@ -105,7 +105,18 @@ fn paper_planes(right: Indeterminate, paper_planes: &mut Vec<PaperPlane>) {
     if stack.button().text("New Paper Plane").finish() {
         paper_planes.push(PaperPlane { paper_size: 1 });
     }
-    for (index, _paper_plane) in paper_planes.iter().enumerate() {
-        stack.label(format!("Plane {}", index)).handle(&index).finish();
+    for (index, paper_plane) in paper_planes.iter_mut().enumerate() {
+        let (l, r) = stack.layout().vertical_panels();
+        let handle = PtrHandle::new(paper_plane);
+        l.stacklayout()
+            .label(format!("Plane {}", index))
+            .handle(&index)
+            .finish();
+        r.stacklayout()
+            .number(&mut paper_plane.paper_size)
+            .handle(&handle)
+            .text("Paper Size")
+            .finish()
+            .unwrap();
     }
 }

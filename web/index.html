@@ -139,6 +139,7 @@
                 "Checkbox": create_or_update_checkbox,
                 "Label": create_or_update_label,
                 "Header": create_or_update_header,
+                "Number": create_or_update_number,
             }[type])
             let dom_node = create_or_update_function(handle_hash, vdom)
             if (!dom_node) {
@@ -311,7 +312,37 @@
             })
             return dom_node
         }
+        function create_or_update_number(handle_hash, vdom) {
+            let node = vdom[handle_hash]
+            let dom_node = reuse_or_create(node, () => {
+                let number = document.createElement("input")
+                number.id = handle_hash
+                number.type = "number"
+                number.min = node.Number.min
+                number.max = node.Number.max
+                number.step = node.Number.step
+                number.value = node.Number.value
+                number.addEventListener('change', (event) => {
+                    send_event({"Event":{"NumberChanged":[handle_hash, parseInt(number.value)]}})
+                })
 
+                if (node.Number.text) {
+                    let label = document.createElement("label")
+                    label.for = handle_hash
+                    label.innerHTML = node.Number.text
+
+                    let container = document.createElement("div")
+                    container.appendChild(number)
+                    container.appendChild(label)
+
+                    return container
+                } else {
+                    return number
+                }
+                return container
+            })
+            return dom_node
+        }
 
         function send_event(event) {
             var event = JSON.stringify(event)

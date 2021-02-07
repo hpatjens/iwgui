@@ -1,3 +1,4 @@
+use num::{NumCast, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, collections::BTreeMap, panic::Location};
 use log::warn;
@@ -407,6 +408,7 @@ impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
         self    
     }
 
+    // TODO: Clean this up
     pub fn finish(self) {
         let id = self.id;
         self.parent.push_element(id.clone(), Element::new_checkbox(self.text, *self.value));
@@ -424,6 +426,83 @@ impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
         if let Some(position) = position {
             events.remove(position);
         }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// CheckboxBuilder
+// ----------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub enum ConvertError {
+    CouldNotConvertServerValue,
+    CouldNotConvertBrowserValue,
+}
+
+pub struct NumberBuilder<'parent, 'value, T> {
+    value: &'value mut T,
+    min: Option<i32>,
+    max: Option<i32>,
+    step: Option<i32>,
+    parent: &'parent mut dyn PushElement,
+    id: HandleHash,
+    text: Option<String>,
+}
+
+impl<'parent, 'value, T> NumberBuilder<'parent, 'value, T>
+where
+    T: Copy + NumCast + ToPrimitive
+{
+    fn new(parent: &'parent mut dyn PushElement, id: HandleHash, value: &'value mut T) -> Self {
+        NumberBuilder {
+            min: None,
+            max: None,
+            step: None,
+            value,
+            parent,
+            id,
+            text: None,
+        }
+    }
+
+    pub fn text<S: ToString>(mut self, text: S) -> Self {
+        self.text = Some(text.to_string());
+        self
+    }
+
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
+    #[track_caller]
+    pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
+        self.id = manual_handle(Location::caller(), handle);
+        self    
+    }
+
+    // TODO: Clean this up
+    pub fn finish(self) -> Result<(), ConvertError> {
+        let id = self.id;
+        let element = Element::Number {
+            text: self.text,
+            min: self.min,
+            max: self.max,
+            step: self.step,
+            value: NumCast::from(*self.value).ok_or(ConvertError::CouldNotConvertServerValue)?,
+        };
+        self.parent.push_element(id.clone(), element);
+        let events = &mut self.parent.gui().borrow_mut().events;
+        let event = events.iter().find(|event| event.id == id);
+        let position = if let Some(event) = event {
+            match event.kind {
+                Kind::NumberChanged(value) => *self.value = NumCast::from(value).ok_or(ConvertError::CouldNotConvertBrowserValue)?,
+                _ => warn!("wrong event for number {:?}", event),
+            }
+            events.iter().position(|event| event.id == id)
+        } else {
+            None
+        };
+        if let Some(position) = position {
+            events.remove(position);
+        }
+        Ok(())
     }
 }
 
@@ -476,6 +555,17 @@ pub trait Elements {
         CheckboxBuilder::new(parent, id, value)
     }
 
+    #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+    #[track_caller]
+    fn number<'value, T>(&mut self, value: &'value mut T) -> NumberBuilder<'_, 'value, T>
+    where 
+        T: Copy + NumCast + ToPrimitive
+    {
+        let parent = self.curve_ball().push_element;
+        let id = HandleHash::from_caller();
+        NumberBuilder::new(parent, id, value)
+    }
+
     #[track_caller]
     fn layout<'gui>(&'gui mut self) -> Indeterminate<'gui> {
         let e = self.curve_ball().push_element;
@@ -496,17 +586,36 @@ enum Element {
     Indeterminate,
     Header(String),
     Label(String),
-    Button { text: Option<String> },
-    Checkbox { text: Option<String>, checked: bool, },
-    StackLayout { children: Vec<HandleHash> },
-    Columns { left: HandleHash, right: HandleHash },
+    Button { 
+        text: Option<String>
+    },
+    Checkbox { 
+        text: Option<String>, 
+        checked: bool,
+    },
+    Number { 
+        text: Option<String>, 
+        min: Option<i32>, 
+        max: Option<i32>, 
+        step: Option<i32>, 
+        value: i32
+    },
+    StackLayout { 
+        children: Vec<HandleHash>
+    },
+    Columns { 
+        left: HandleHash, 
+        right: HandleHash
+    },
 }
 
 impl Element {
+    // TODO: Use Into<Option>
     fn new_button(text: Option<String>) -> Element {
         Element::Button { text }
     }
 
+    // TODO: Use Into<Option>
     fn new_checkbox(text: Option<String>, checked: bool) -> Element {
         Element::Checkbox { text, checked }
     }
@@ -520,6 +629,7 @@ impl Element {
 pub enum Kind {
     None,
     CheckboxChecked(bool),
+    NumberChanged(i32),
 }
 
 #[derive(Debug)]
@@ -532,6 +642,7 @@ pub struct Event {
 pub enum BrowserServerEvent {
     ButtonPressed(HandleHash),
     CheckboxChecked(HandleHash, bool),
+    NumberChanged(HandleHash, i32),
 }
 
 impl Event {
@@ -547,6 +658,12 @@ impl Event {
                 Some(Event { 
                     id: handle_hash,
                     kind: Kind::CheckboxChecked(state),
+                })
+            }
+            BrowserServerEvent::NumberChanged(handle_hash, value) => {
+                Some(Event {
+                    id: handle_hash,
+                    kind: Kind::NumberChanged(value),
                 })
             }
         }
