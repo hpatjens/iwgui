@@ -269,6 +269,7 @@
                 let checkbox = document.createElement("input")
                 checkbox.id = handle_hash
                 checkbox.type = "checkbox"
+                checkbox.checked = node.Checkbox.checked
                 checkbox.addEventListener('change', (event) => {
                     send_event({"Event":{"CheckboxChecked":[handle_hash, checkbox.checked ? true : false]}})
                 })

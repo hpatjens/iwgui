@@ -409,7 +409,7 @@ impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
 
     pub fn finish(self) {
         let id = self.id;
-        self.parent.push_element(id.clone(), Element::new_checkbox(self.text));
+        self.parent.push_element(id.clone(), Element::new_checkbox(self.text, *self.value));
         let events = &mut self.parent.gui().borrow_mut().events;
         let event = events.iter().find(|event| event.id == id);
         let position = if let Some(event) = event {
@@ -497,7 +497,7 @@ enum Element {
     Header(String),
     Label(String),
     Button { text: Option<String> },
-    Checkbox { text: Option<String> },
+    Checkbox { text: Option<String>, checked: bool, },
     StackLayout { children: Vec<HandleHash> },
     Columns { left: HandleHash, right: HandleHash },
 }
@@ -507,8 +507,8 @@ impl Element {
         Element::Button { text }
     }
 
-    fn new_checkbox(text: Option<String>) -> Element {
-        Element::Checkbox { text }
+    fn new_checkbox(text: Option<String>, checked: bool) -> Element {
+        Element::Checkbox { text, checked }
     }
 }
 
