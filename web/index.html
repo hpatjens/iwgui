@@ -1,5 +1,20 @@
 <html>
+    <head>
+        <link rel="preconnect" href="https://fonts.gstatic.com">
+        <link href="https://fonts.googleapis.com/css2?family=Abel&display=swap" rel="stylesheet">
+    </head>
     <style>
+        :root {
+            --interactive: #1e92fe;
+            --interactive-hover: #1074e0;
+            --interactive-text: #FFFFFF;
+        }
+
+        * {
+            font-family: 'Abel', sans-serif;
+            user-select: none;
+        }
+
         button {
             display: block;
         }
@@ -11,6 +26,32 @@
         .column {
             flex: 50%;
         }
+
+
+        button {
+            background-color: var(--interactive);
+            cursor: pointer;
+            color: var(--interactive-text);
+            outline: none;
+            box-shadow: none;
+            padding: 4 8 4 8;
+            border: 0;
+        }
+        button:hover {
+            background-color: var(--interactive-hover);
+        }
+
+        input {
+            outline: none;
+            background-color: #EEEEEE;
+            border: 0;
+        }
+
+        h1 {
+            padding: 4;
+            background-color: #EEEEEE;
+        }
+
 
     </style>
     <script>

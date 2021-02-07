@@ -256,7 +256,8 @@ fn handle_incoming_connection(mut stream: TcpStream) {
             Ok(_bytes_read) => {
                 info!("Read bytes on connection {}", address);
                 let uuid_string = format!("\"{}\"", Uuid::new_v4().to_string());
-                let contents = include_str!("../web/index.html").replace("#uuid", &uuid_string);
+                //let contents = include_str!("../web/index.html").replace("#uuid", &uuid_string);
+                let contents = std::fs::read_to_string("web/index.html").unwrap().replace("#uuid", &uuid_string);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
                     contents.len(),
