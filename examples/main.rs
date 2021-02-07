@@ -109,10 +109,3 @@ fn paper_planes(right: Indeterminate, paper_planes: &mut Vec<PaperPlane>) {
         stack.label(format!("Plane {}", index)).handle(&index).finish();
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn main_loop() {}
-}
