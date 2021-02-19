@@ -12,7 +12,7 @@ struct Duck {
 
 struct PaperPlane {
     paper_size: usize, // TODO: Replace this with an enum
-
+    name: String,
 }
 
 struct Model {
@@ -103,13 +103,18 @@ fn ducks(left: Indeterminate, ducks_at_the_pont: &mut Vec<Duck>) {
 fn paper_planes(right: Indeterminate, paper_planes: &mut Vec<PaperPlane>) {
     let mut stack = right.stacklayout();
     if stack.button().text("New Paper Plane").finish() {
-        paper_planes.push(PaperPlane { paper_size: 1 });
+        paper_planes.push(PaperPlane { paper_size: 1, name: "unknown".to_owned() });
     }
     for (index, paper_plane) in paper_planes.iter_mut().enumerate() {
         let (l, r) = stack.layout().vertical_panels();
+        let (m, r) = r.vertical_panels();
         let handle = PtrHandle::new(paper_plane);
         l.stacklayout()
             .label(format!("Plane {}", index))
+            .handle(&index)
+            .finish();
+        m.stacklayout()
+            .text_box(&mut paper_plane.name)
             .handle(&index)
             .finish();
         r.stacklayout()

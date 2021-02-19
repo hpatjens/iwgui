@@ -179,6 +179,7 @@
                 "Button": create_or_update_buttons,
                 "Checkbox": create_or_update_checkbox,
                 "Label": create_or_update_label,
+                "Textbox": create_or_update_text_box,
                 "Header": create_or_update_header,
                 "Number": create_or_update_number,
             }[type])
@@ -340,6 +341,20 @@
                 label.id = handle_hash
                 label.innerHTML = node.Label
                 return label
+            })
+            return dom_node
+        }
+        function create_or_update_text_box(handle_hash, vdom) {
+            let node = vdom[handle_hash]
+            let dom_node = reuse_or_create(node, () => {
+                let text_box = document.createElement("input")
+                text_box.type = "text"
+                text_box.value = node.Textbox
+                text_box.id = handle_hash
+                text_box.addEventListener('input', (event) => {
+                    send_event({"Event":{"TextboxChanged":[handle_hash, text_box.value]}})
+                })
+                return text_box
             })
             return dom_node
         }

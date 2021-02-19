@@ -327,6 +327,54 @@ impl<'parent> LabelBuilder<'parent> {
 }
 
 // ----------------------------------------------------------------------------
+// TextboxBuilder
+// ----------------------------------------------------------------------------
+
+pub struct TextboxBuilder<'parent, 's> {
+    parent: &'parent mut dyn PushElement,
+    id: HandleHash,
+    text: &'s mut String,
+}
+
+impl<'parent, 's> TextboxBuilder<'parent, 's> {
+    fn new(parent: &'parent mut dyn PushElement, id: HandleHash, text: &'s mut String) -> Self {
+        TextboxBuilder {
+            parent, 
+            id,
+            text,
+        }
+    }
+
+    // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
+    #[track_caller]
+    pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
+        self.id = manual_handle(Location::caller(), handle);
+        self
+    }
+
+    pub fn finish(self) {
+        let id = self.id;
+        {
+            let events = &mut self.parent.gui().borrow_mut().events;
+            let event = events.iter().find(|event| event.id == id);
+            let position = if let Some(event) = event {
+                match event.kind {
+                    Kind::TextboxChanged(ref value) => *self.text = value.clone(),
+                    _ => warn!("wrong event for checkbox {:?}", event),
+                }
+                events.iter().position(|event| event.id == id)
+            } else {
+                None
+            };
+            if let Some(position) = position {
+                events.remove(position);
+            }    
+        }
+        self.parent.push_element(id, Element::Textbox(self.text.clone()));
+    }
+}
+
+// ----------------------------------------------------------------------------
 // ButtonBuilder
 // ----------------------------------------------------------------------------
 
@@ -411,21 +459,23 @@ impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
     // TODO: Clean this up
     pub fn finish(self) {
         let id = self.id;
-        self.parent.push_element(id.clone(), Element::new_checkbox(self.text, *self.value));
-        let events = &mut self.parent.gui().borrow_mut().events;
-        let event = events.iter().find(|event| event.id == id);
-        let position = if let Some(event) = event {
-            match event.kind {
-                Kind::CheckboxChecked(value) => *self.value = value,
-                _ => warn!("wrong event for checkbox {:?}", event),
+        {
+            let events = &mut self.parent.gui().borrow_mut().events;
+            let event = events.iter().find(|event| event.id == id);
+            let position = if let Some(event) = event {
+                match event.kind {
+                    Kind::CheckboxChecked(value) => *self.value = value,
+                    _ => warn!("wrong event for checkbox {:?}", event),
+                }
+                events.iter().position(|event| event.id == id)
+            } else {
+                None
+            };
+            if let Some(position) = position {
+                events.remove(position);
             }
-            events.iter().position(|event| event.id == id)
-        } else {
-            None
-        };
-        if let Some(position) = position {
-            events.remove(position);
         }
+        self.parent.push_element(id.clone(), Element::new_checkbox(self.text, *self.value));
     }
 }
 
@@ -487,21 +537,23 @@ where
             step: self.step,
             value: NumCast::from(*self.value).ok_or(ConvertError::CouldNotConvertServerValue)?,
         };
-        self.parent.push_element(id.clone(), element);
-        let events = &mut self.parent.gui().borrow_mut().events;
-        let event = events.iter().find(|event| event.id == id);
-        let position = if let Some(event) = event {
-            match event.kind {
-                Kind::NumberChanged(value) => *self.value = NumCast::from(value).ok_or(ConvertError::CouldNotConvertBrowserValue)?,
-                _ => warn!("wrong event for number {:?}", event),
+        {
+            let events = &mut self.parent.gui().borrow_mut().events;
+            let event = events.iter().find(|event| event.id == id);
+            let position = if let Some(event) = event {
+                match event.kind {
+                    Kind::NumberChanged(value) => *self.value = NumCast::from(value).ok_or(ConvertError::CouldNotConvertBrowserValue)?,
+                    _ => warn!("wrong event for number {:?}", event),
+                }
+                events.iter().position(|event| event.id == id)
+            } else {
+                None
+            };
+            if let Some(position) = position {
+                events.remove(position);
             }
-            events.iter().position(|event| event.id == id)
-        } else {
-            None
-        };
-        if let Some(position) = position {
-            events.remove(position);
         }
+        self.parent.push_element(id.clone(), element);
         Ok(())
     }
 }
@@ -537,6 +589,14 @@ pub trait Elements {
         let parent = self.curve_ball().push_element;
         let id = HandleHash::from_caller();
         LabelBuilder::new(parent, id, text.as_ref().to_string())
+    }
+
+    #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
+    #[track_caller]
+    fn text_box<'s>(&mut self, text: &'s mut String) -> TextboxBuilder<'_, 's> {
+        let parent = self.curve_ball().push_element;
+        let id = HandleHash::from_caller();
+        TextboxBuilder::new(parent, id, text)
     }
 
     #[must_use = "The finish method has to be called on the ButtonBuilder to create a button."]
@@ -586,6 +646,7 @@ enum Element {
     Indeterminate,
     Header(String),
     Label(String),
+    Textbox(String),
     Button { 
         text: Option<String>
     },
@@ -630,6 +691,7 @@ pub enum Kind {
     None,
     CheckboxChecked(bool),
     NumberChanged(i32),
+    TextboxChanged(String),
 }
 
 #[derive(Debug)]
@@ -643,6 +705,7 @@ pub enum BrowserServerEvent {
     ButtonPressed(HandleHash),
     CheckboxChecked(HandleHash, bool),
     NumberChanged(HandleHash, i32),
+    TextboxChanged(HandleHash, String),
 }
 
 impl Event {
@@ -664,6 +727,12 @@ impl Event {
                 Some(Event {
                     id: handle_hash,
                     kind: Kind::NumberChanged(value),
+                })
+            }
+            BrowserServerEvent::TextboxChanged(handle_hash, value) => {
+                Some(Event {
+                    id: handle_hash,
+                    kind: Kind::TextboxChanged(value),
                 })
             }
         }
