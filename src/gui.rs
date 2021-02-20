@@ -84,7 +84,7 @@ impl Handle for usize {
 
 #[derive(Debug)]
 struct GuiState {
-    events: Vec<Event>,
+    events: BTreeMap<HandleHash, Vec<EventKind>>,
     next_id: usize,
     root: Option<HandleHash>,
     elements: BTreeMap<HandleHash, Element>,
@@ -111,7 +111,7 @@ pub struct Gui {
 }
 
 impl<'gui> Gui {
-    pub(crate) fn empty(events: Vec<Event>) -> Self {
+    pub(crate) fn empty(events: BTreeMap<HandleHash, Vec<EventKind>>) -> Self {
         Self {
             state: RefCell::new(GuiState {
                 events,
@@ -286,7 +286,7 @@ impl PushElement for StackLayout<'_> {
         }
     }
 
-    fn gui(&mut self) -> &RefCell<GuiState> {
+    fn gui(&self) -> &RefCell<GuiState> {
         self.state
     }
 
@@ -332,7 +332,7 @@ impl<'parent> LabelBuilder<'parent> {
 
 pub struct TextboxBuilder<'parent, 's> {
     parent: &'parent mut dyn PushElement,
-    id: HandleHash,
+    handle_hash: HandleHash,
     text: &'s mut String,
 }
 
@@ -340,7 +340,7 @@ impl<'parent, 's> TextboxBuilder<'parent, 's> {
     fn new(parent: &'parent mut dyn PushElement, id: HandleHash, text: &'s mut String) -> Self {
         TextboxBuilder {
             parent, 
-            id,
+            handle_hash: id,
             text,
         }
     }
@@ -348,29 +348,21 @@ impl<'parent, 's> TextboxBuilder<'parent, 's> {
     // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
     #[track_caller]
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
-        self.id = manual_handle(Location::caller(), handle);
+        self.handle_hash = manual_handle(Location::caller(), handle);
         self
     }
 
     pub fn finish(self) {
-        let id = self.id;
-        {
-            let events = &mut self.parent.gui().borrow_mut().events;
-            let event = events.iter().find(|event| event.id == id);
-            let position = if let Some(event) = event {
-                match event.kind {
-                    Kind::TextboxChanged(ref value) => *self.text = value.clone(),
-                    _ => warn!("wrong event for checkbox {:?}", event),
+        let handle_hash = self.handle_hash;
+        if let Some(kinds) = &mut self.parent.gui().borrow_mut().events.remove(&handle_hash) {
+            for kind in kinds.into_iter() {
+                match kind {
+                    EventKind::TextboxChanged(ref value) => *self.text = value.clone(),
+                    _ => warn!("wrong event for checkbox {:?}: {:?}", handle_hash, kind),
                 }
-                events.iter().position(|event| event.id == id)
-            } else {
-                None
-            };
-            if let Some(position) = position {
-                events.remove(position);
-            }    
+            }
         }
-        self.parent.push_element(id, Element::Textbox(self.text.clone()));
+        self.parent.push_element(handle_hash, Element::Textbox(self.text.clone()));
     }
 }
 
@@ -384,7 +376,7 @@ fn manual_handle(location: &Location, handle: &impl Handle) -> HandleHash {
 
 pub struct ButtonBuilder<'parent> {
     parent: &'parent mut dyn PushElement,
-    id: HandleHash,
+    handle_hash: HandleHash,
     text: Option<String>,
 }
 
@@ -392,7 +384,7 @@ impl<'parent> ButtonBuilder<'parent> {
     fn new(parent: &'parent mut dyn PushElement, id: HandleHash) -> Self {
         ButtonBuilder {
             parent, 
-            id,
+            handle_hash: id,
             text: None,
         }
     }
@@ -405,21 +397,20 @@ impl<'parent> ButtonBuilder<'parent> {
     // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
     #[track_caller]
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
-        self.id = manual_handle(Location::caller(), handle);
+        self.handle_hash = manual_handle(Location::caller(), handle);
         self
     }
 
     pub fn finish(self) -> bool {
-        let id = self.id;
-        self.parent.push_element(id.clone(), Element::new_button(self.text));
-        let events = &mut self.parent.gui().borrow_mut().events;
-        let position = events.iter().position(|event| event.id == id);
-        if let Some(position) = position {
-            events.remove(position);
-            true
-        } else {
-            false
+        let handle_hash = self.handle_hash;
+        let mut was_pressed = false;
+        if let Some(kinds) = &mut self.parent.gui().borrow_mut().events.remove(&handle_hash) {
+            for _ in kinds.into_iter() {
+                was_pressed = true;
+            }
         }
+        self.parent.push_element(handle_hash.clone(), Element::new_button(self.text));
+        return was_pressed;
     }
 }
 
@@ -430,16 +421,16 @@ impl<'parent> ButtonBuilder<'parent> {
 pub struct CheckboxBuilder<'parent, 'value> {
     value: &'value mut bool,
     parent: &'parent mut dyn PushElement,
-    id: HandleHash,
+    handle_hash: HandleHash,
     text: Option<String>,
 }
 
 impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
-    fn new(parent: &'parent mut dyn PushElement, id: HandleHash, value: &'value mut bool) -> Self {
+    fn new(parent: &'parent mut dyn PushElement, handle_hash: HandleHash, value: &'value mut bool) -> Self {
         CheckboxBuilder {
             value,
             parent,
-            id,
+            handle_hash,
             text: None,
         }
     }
@@ -452,30 +443,22 @@ impl<'parent, 'value> CheckboxBuilder<'parent, 'value> {
     // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
     #[track_caller]
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
-        self.id = manual_handle(Location::caller(), handle);
+        self.handle_hash = manual_handle(Location::caller(), handle);
         self    
     }
 
     // TODO: Clean this up
     pub fn finish(self) {
-        let id = self.id;
-        {
-            let events = &mut self.parent.gui().borrow_mut().events;
-            let event = events.iter().find(|event| event.id == id);
-            let position = if let Some(event) = event {
-                match event.kind {
-                    Kind::CheckboxChecked(value) => *self.value = value,
-                    _ => warn!("wrong event for checkbox {:?}", event),
+        let handle_hash = self.handle_hash;
+        if let Some(kinds) = &mut self.parent.gui().borrow_mut().events.remove(&handle_hash) {
+            for kind in kinds.into_iter() {
+                match kind {
+                    EventKind::CheckboxChecked(value) => *self.value = *value,
+                    _ => warn!("wrong event for checkbox {:?}: {:?}", handle_hash, kind),
                 }
-                events.iter().position(|event| event.id == id)
-            } else {
-                None
-            };
-            if let Some(position) = position {
-                events.remove(position);
             }
         }
-        self.parent.push_element(id.clone(), Element::new_checkbox(self.text, *self.value));
+        self.parent.push_element(handle_hash.clone(), Element::new_checkbox(self.text, *self.value));
     }
 }
 
@@ -495,7 +478,7 @@ pub struct NumberBuilder<'parent, 'value, T> {
     max: Option<i32>,
     step: Option<i32>,
     parent: &'parent mut dyn PushElement,
-    id: HandleHash,
+    handle_hash: HandleHash,
     text: Option<String>,
 }
 
@@ -510,7 +493,7 @@ where
             step: None,
             value,
             parent,
-            id,
+            handle_hash: id,
             text: None,
         }
     }
@@ -523,13 +506,13 @@ where
     // TODO: Don't create a handle when the builder is create but only either in a `handle` method or in the `finish` method
     #[track_caller]
     pub fn handle<H: Handle>(mut self, handle: &H) -> Self {
-        self.id = manual_handle(Location::caller(), handle);
+        self.handle_hash = manual_handle(Location::caller(), handle);
         self    
     }
 
     // TODO: Clean this up
     pub fn finish(self) -> Result<(), ConvertError> {
-        let id = self.id;
+        let handle_hash = self.handle_hash;
         let element = Element::Number {
             text: self.text,
             min: self.min,
@@ -539,21 +522,16 @@ where
         };
         {
             let events = &mut self.parent.gui().borrow_mut().events;
-            let event = events.iter().find(|event| event.id == id);
-            let position = if let Some(event) = event {
-                match event.kind {
-                    Kind::NumberChanged(value) => *self.value = NumCast::from(value).ok_or(ConvertError::CouldNotConvertBrowserValue)?,
-                    _ => warn!("wrong event for number {:?}", event),
+            if let Some(kinds) = events.remove(&handle_hash) {
+                for kind in kinds {
+                    match kind {
+                        EventKind::NumberChanged(value) => *self.value = NumCast::from(value).ok_or(ConvertError::CouldNotConvertBrowserValue)?,
+                        _ => warn!("wrong event for number {:?}", kind),
+                    }
                 }
-                events.iter().position(|event| event.id == id)
-            } else {
-                None
-            };
-            if let Some(position) = position {
-                events.remove(position);
             }
         }
-        self.parent.push_element(id.clone(), element);
+        self.parent.push_element(handle_hash.clone(), element);
         Ok(())
     }
 }
@@ -569,7 +547,7 @@ pub struct CurveBall<'p> {
 trait PushElement {
     fn push_element(&mut self, id: HandleHash, element: Element);
     fn handle_hash(&self) -> HandleHash;
-    fn gui(&mut self) -> &RefCell<GuiState>;
+    fn gui(&self) -> &RefCell<GuiState>;
 }
 
 pub trait Elements {
@@ -686,57 +664,18 @@ impl Element {
 //
 // ----------------------------------------------------------------------------
 
-#[derive(Debug)]
-pub enum Kind {
-    None,
+#[derive(Debug, Deserialize, Clone)]
+pub enum EventKind {
+    ButtonPressed,
     CheckboxChecked(bool),
     NumberChanged(i32),
     TextboxChanged(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Event {
-    id: HandleHash,
-    kind: Kind,
-}
-
-#[derive(Debug, Deserialize)]
-pub enum BrowserServerEvent {
-    ButtonPressed(HandleHash),
-    CheckboxChecked(HandleHash, bool),
-    NumberChanged(HandleHash, i32),
-    TextboxChanged(HandleHash, String),
-}
-
-impl Event {
-    pub fn from(event: BrowserServerEvent) -> Option<Self> {
-        match event {
-            BrowserServerEvent::ButtonPressed(handle_hash) => {
-                Some(Event { 
-                    id: handle_hash,
-                    kind: Kind::None,
-                })
-            }
-            BrowserServerEvent::CheckboxChecked(handle_hash, state) => {
-                Some(Event { 
-                    id: handle_hash,
-                    kind: Kind::CheckboxChecked(state),
-                })
-            }
-            BrowserServerEvent::NumberChanged(handle_hash, value) => {
-                Some(Event {
-                    id: handle_hash,
-                    kind: Kind::NumberChanged(value),
-                })
-            }
-            BrowserServerEvent::TextboxChanged(handle_hash, value) => {
-                Some(Event {
-                    id: handle_hash,
-                    kind: Kind::TextboxChanged(value),
-                })
-            }
-        }
-    }
+    pub handle_hash: HandleHash,
+    pub kind: EventKind,
 }
 
 /// Json value

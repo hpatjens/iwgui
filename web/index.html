@@ -300,7 +300,12 @@
                     button.innerHTML = "Button"
                 }
                 button.addEventListener ("click", function() {
-                    send_event({"Event":{"ButtonPressed":handle_hash}})
+                    send_event({
+                        "Event":{
+                            handle_hash: handle_hash,
+                            kind: "ButtonPressed"
+                        }
+                    })
                 });
                 return button
             })
@@ -314,7 +319,14 @@
                 checkbox.type = "checkbox"
                 checkbox.checked = node.Checkbox.checked
                 checkbox.addEventListener('change', (event) => {
-                    send_event({"Event":{"CheckboxChecked":[handle_hash, checkbox.checked ? true : false]}})
+                    send_event({
+                        "Event":{
+                            handle_hash: handle_hash,
+                            kind:{
+                                "CheckboxChecked": checkbox.checked ? true : false
+                            }
+                        }
+                    })
                 })
 
                 if (node.Checkbox.text) {
@@ -352,7 +364,14 @@
                 text_box.value = node.Textbox
                 text_box.id = handle_hash
                 text_box.addEventListener('input', (event) => {
-                    send_event({"Event":{"TextboxChanged":[handle_hash, text_box.value]}})
+                    send_event({
+                        "Event":{
+                            handle_hash: handle_hash, 
+                            kind: {
+                                "TextboxChanged": text_box.value
+                            }
+                        }
+                    })
                 })
                 return text_box
             })
@@ -379,7 +398,14 @@
                 number.step = node.Number.step
                 number.value = node.Number.value
                 number.addEventListener('change', (event) => {
-                    send_event({"Event":{"NumberChanged":[handle_hash, parseInt(number.value)]}})
+                    send_event({
+                        "Event":{
+                            handle_hash: handle_hash, 
+                            kind: {
+                                "NumberChanged": parseInt(number.value)
+                            }
+                        }
+                    })
                 })
 
                 if (node.Number.text) {

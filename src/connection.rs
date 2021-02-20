@@ -1,24 +1,17 @@
 use log::{debug, error, info, warn};
 use serde::Deserialize;
-use std::{
-    io::{Read, Write},
-    mem,
-    net::{TcpListener, TcpStream, ToSocketAddrs},
-    slice::IterMut,
-    sync::Arc,
-    thread,
-};
+use std::{collections::BTreeMap, io::{Read, Write}, mem, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::Arc, thread};
 use tungstenite::{error::Error, Message, WebSocket};
 use uuid::Uuid;
 use parking_lot::{Mutex, MutexGuard};
 
-use crate::gui::{BrowserServerEvent, Event, Gui};
+use crate::{EventKind, HandleHash, gui::{Event, Gui}};
 
 pub struct Connection {
     uuid: Uuid,
     to_browser_websocket: Option<WebSocket<TcpStream>>, // This is assigned second
     last_gui: Option<Gui>,
-    pending_events: Arc<Mutex<Vec<BrowserServerEvent>>>, // TODO: Not good that this has to be a different type of event
+    pending_events: Arc<Mutex<BTreeMap<HandleHash, Vec<EventKind>>>>,
 }
 
 impl Connection {
@@ -27,12 +20,9 @@ impl Connection {
         Gui::empty(events)
     }
 
-    fn events(&mut self) -> Vec<Event> {
+    fn events(&mut self) -> BTreeMap<HandleHash, Vec<EventKind>> {
         let mut pending_events = self.pending_events.lock();
         mem::take(&mut *pending_events)
-            .into_iter()
-            .map(|event| Event::from(event).unwrap()) // TODO: unwrap
-            .collect()
     }
 
     pub fn show_gui(&mut self, gui: Gui) {
@@ -134,7 +124,7 @@ enum BrowserServerMessage {
         direction: WebsocketDirection,
         uuid: String,
     },
-    Event(BrowserServerEvent),
+    Event(Event),
 }
 
 fn handle_incoming_event(message: &str, connections: Arc<Mutex<Vec<Connection>>>, uuid: Uuid) {
@@ -152,7 +142,10 @@ fn handle_incoming_event(message: &str, connections: Arc<Mutex<Vec<Connection>>>
         Ok(BrowserServerMessage::Event(event)) => {
             info!("Received event: {:?}", event);
             let mut pending_events = pending_events.lock();
-            pending_events.push(event);
+            pending_events
+                .entry(event.handle_hash)
+                .and_modify(|vec| vec.push(event.kind.clone()))
+                .or_insert(vec![event.kind]);
         }
         Ok(BrowserServerMessage::Welcome { .. }) => {
             todo!() // TODO: Error handling
@@ -177,7 +170,7 @@ fn handle_welcome_message(
                     to_browser_websocket: Some(websocket),
                     uuid,
                     last_gui: None,
-                    pending_events: Arc::new(Mutex::new(Vec::new())),
+                    pending_events: Arc::new(Mutex::new(BTreeMap::new())),
                 };
                 let mut connections = connections.lock();
                 connections.push(connection);
