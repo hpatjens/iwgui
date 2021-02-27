@@ -20,6 +20,28 @@ struct Model {
     paper_planes: Vec<PaperPlane>,
 }
 
+impl Model {
+    fn example() -> Self {
+        Self {
+            ducks_at_the_pont: vec![
+                Duck {
+                    name: String::from("Robin"),
+                    in_the_water: false,
+                },
+                Duck {
+                    name: String::from("Jenny"),
+                    in_the_water: true,
+                },
+                Duck {
+                    name: String::from("Melissa"),
+                    in_the_water: false,
+                }
+            ],
+            paper_planes: Vec::new(),
+        }
+    }
+}
+
 fn main() {
     SimpleLogger::new()
         .with_module_level("tungstenite", LevelFilter::Warn)
@@ -27,25 +49,7 @@ fn main() {
         .unwrap();
 
     let mut server = Server::new("127.0.0.1:8080");
-
-    let mut model = Model {
-        ducks_at_the_pont: vec![
-            Duck {
-                name: String::from("Robin"),
-                in_the_water: false,
-            },
-            Duck {
-                name: String::from("Jenny"),
-                in_the_water: true,
-            },
-            Duck {
-                name: String::from("Melissa"),
-                in_the_water: false,
-            }
-        ],
-        paper_planes: Vec::new(),
-    };
-
+    let mut model = Model::example();
     loop {
         for connection in &mut server.connections() {
             let mut gui = connection.gui();
