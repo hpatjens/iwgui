@@ -188,11 +188,19 @@ fn handle_welcome_message(
                         Ok(Message::Text(message)) => {
                             handle_incoming_event(&message, connections.clone(), uuid)
                         }
+                        Ok(Message::Close(_)) => {
+                            info!("Closing websocket {}", uuid);
+                            break;
+                        }
                         Ok(unexpected_message) => {
                             warn!("Unexpected message: {:?}", unexpected_message)
                         }
+                        Err(Error::ConnectionClosed) => {
+                            info!("Connection closed {}", uuid);
+                            break;
+                        }
                         Err(err) => {
-                            panic!(err);
+                            panic!("Panic {:?}", err);
                         }
                     }
                 }
