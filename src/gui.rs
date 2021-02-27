@@ -205,6 +205,9 @@ impl<'gui> Gui {
         // TODO: Integrate the hash from the parent
         let handle_hash = HandleHash::from_caller(); 
         state.elements.insert(handle_hash, Element::Indeterminate);
+        if let Some(_) = state.root {
+            panic!("root is already set");
+        }
         state.root = Some(handle_hash.clone());
         Indeterminate::new(&self.state, handle_hash)
     }
