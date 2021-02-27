@@ -214,6 +214,11 @@ impl<'gui> Gui {
 // Indeterminate
 // ----------------------------------------------------------------------------
 
+pub trait Layout<'gui> {
+    fn stacklayout(self) -> StackLayout<'gui>;
+    fn vertical_panels(self) -> (Indeterminate<'gui>, Indeterminate<'gui>);
+}
+
 pub struct Indeterminate<'gui> {
     state: &'gui RefCell<GuiState>,
     handle_hash: HandleHash, // `Element` will be changed when the type of the `Indeterminate` is determined
@@ -223,8 +228,10 @@ impl<'gui> Indeterminate<'gui> {
     fn new(state: &'gui RefCell<GuiState>, handle_hash: HandleHash) -> Self {
         Self { state, handle_hash }
     }
+}
 
-    pub fn stacklayout(self) -> StackLayout<'gui> {
+impl<'gui> Layout<'gui> for Indeterminate<'gui> {
+    fn stacklayout(self) -> StackLayout<'gui> {
         let mut state = self.state.borrow_mut();
         let element = Element::StackLayout {
             children: Vec::new(),
@@ -239,7 +246,7 @@ impl<'gui> Indeterminate<'gui> {
         }
     }
 
-    pub fn vertical_panels(self) -> (Indeterminate<'gui>, Indeterminate<'gui>) {
+    fn vertical_panels(self) -> (Indeterminate<'gui>, Indeterminate<'gui>) {
         let mut state = self.state.borrow_mut();
         let left_hash = HandleHash::combine(
             self.handle_hash, 
