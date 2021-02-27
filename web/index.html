@@ -115,7 +115,9 @@
                 delete vdom[handle_hash]
             }
             for (const handle_hash in server_browser_update.updated) {
+                let old_dom_node = vdom[handle_hash].dom_node
                 vdom[handle_hash] = server_browser_update.updated[handle_hash]
+                vdom[handle_hash].old_dom_node = old_dom_node
             }
             for (const handle_hash in server_browser_update.added) {
                 vdom[handle_hash] = server_browser_update.added[handle_hash]
@@ -359,20 +361,26 @@
         function create_or_update_text_box(handle_hash, vdom) {
             let node = vdom[handle_hash]
             let dom_node = reuse_or_create(node, () => {
-                let text_box = document.createElement("input")
+                function new_element() {
+                    let text_box = document.createElement("input")
+                    text_box.addEventListener('input', (event) => {
+                        send_event({
+                            "Event":{
+                                handle_hash: handle_hash, 
+                                kind: {
+                                    "TextboxChanged": text_box.value
+                                }
+                            }
+                        })
+                    })
+                    return text_box
+                }
+                let text_box = node.old_dom_node
+                    ? node.old_dom_node
+                    : new_element()
                 text_box.type = "text"
                 text_box.value = node.Textbox
                 text_box.id = handle_hash
-                text_box.addEventListener('input', (event) => {
-                    send_event({
-                        "Event":{
-                            handle_hash: handle_hash, 
-                            kind: {
-                                "TextboxChanged": text_box.value
-                            }
-                        }
-                    })
-                })
                 return text_box
             })
             return dom_node
