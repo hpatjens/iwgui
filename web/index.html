@@ -27,7 +27,6 @@
             flex: 50%;
         }
 
-
         button {
             background-color: var(--interactive);
             cursor: pointer;
@@ -51,8 +50,6 @@
             padding: 4;
             background-color: #EEEEEE;
         }
-
-
     </style>
     <script>
         let to_browser_socket = new WebSocket("ws://localhost:9001")
@@ -61,40 +58,10 @@
         let vdom_root = null
         let vdom = {}
 
-        /// true when the object has to properties, otherwise false
-        function is_empty(obj) {
-            console.assert(obj, { errorMsg: "value must be truthly" })
-            return Object.keys(obj).length === 0 && obj.constructor === Object
-        }
-
-        /// Returns the first value of the object
-        function first_value(obj) {
-            console.assert(obj, { errorMsg: "value must be truthly" })
-            console.assert(Object.keys(obj).length > 0, { number: Object.keys(obj).length, errorMsg: "no first element available" })
-            return obj[Object.keys(obj)[0]]
-        }
-
-        /// Returns the first key of the object
         function first_key(obj) {
             console.assert(obj, { errorMsg: "value must be truthly" })
             console.assert(Object.keys(obj).length > 0, { number: Object.keys(obj).length, errorMsg: "no first element available" })
             return Object.keys(obj)[0]
-        }
-
-        /// Removes the first key-value pair of the object and returns it
-        function pop_first_value(obj) {
-            console.assert(obj, { errorMsg: "value must be truthly" })
-            var result = first_value(obj)
-            delete obj[Object.keys(obj)[0]]
-            return result
-        }
-
-        function pop_first_property(obj) {
-            console.assert(obj, { errorMsg: "value must be truthly" })
-            var key = first_key(obj)
-            var value = first_value(obj)
-            delete obj[Object.keys(obj)[0]]
-            return [key, value]
         }
 
         to_browser_socket.onopen = function(e) {
@@ -146,8 +113,6 @@
             console.log(`[error] ${error.message}`)
         }
 
-
-        
         to_server_socket.onopen = function(e) {
             // Send the welcome message to the server to register this websocket as the one responsible for the browser-server connection
             to_server_socket.send(JSON.stringify({
@@ -221,22 +186,6 @@
                 }
                 index += 1
             }
-
-            /*
-            dom_node.innerHTML = ""
-            for (const child_handle_hash of node.StackLayout.children) {
-                // let new_child = convert_to_dom(child_handle_hash, vdom)
-                // let child = document.getElementById(handle_hash)
-                // if (child == null) {
-                //     dom_node.appendChild(new_child)
-                // } else if (child != new_child) {
-                //     child.replaceWith(new_child)
-                // }
-                let child = convert_to_dom(child_handle_hash, vdom)
-                dom_node.appendChild(child)
-            }
-            */
-            // TODO: Remove children that were not hit
             return dom_node
         }
         function create_or_update_columns(handle_hash, vdom) {
