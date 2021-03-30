@@ -86,8 +86,8 @@ fn ducks(left: Indeterminate, ducks_at_the_pont: &mut Vec<Duck>) {
             .text("In the water")
             .finish();
     }
-    let area51 = stack.layout();
-    let (lower_left, lower_right) = area51.vertical_panels();
+    let lower = stack.layout();
+    let (lower_left, lower_right) = lower.vertical_panels();
     let mut lower_left_stack = lower_left.stacklayout();
     lower_left_stack.header("Left side");
     if lower_left_stack.button().text("Throw bread").finish() {
@@ -110,7 +110,7 @@ fn paper_planes(right: Indeterminate, paper_planes: &mut Vec<PaperPlane>) {
     }
     for (index, paper_plane) in paper_planes.iter_mut().enumerate() {
         let (l, r) = stack.layout().vertical_panels();
-        let (m, r) = r.vertical_panels();
+        let (l, m) = l.vertical_panels();
         let handle = PtrHandle::new(paper_plane);
         l.stacklayout()
             .label(format!("Plane {}", index))
