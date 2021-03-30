@@ -1,11 +1,22 @@
 use log::{debug, error, info, warn};
+use parking_lot::{Mutex, MutexGuard};
 use serde::Deserialize;
-use std::{collections::BTreeMap, io::{Read, Write}, mem, net::{TcpListener, TcpStream, ToSocketAddrs}, slice::IterMut, sync::Arc, thread};
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+    mem,
+    net::{TcpListener, TcpStream, ToSocketAddrs},
+    slice::IterMut,
+    sync::Arc,
+    thread,
+};
 use tungstenite::{error::Error, Message, WebSocket};
 use uuid::Uuid;
-use parking_lot::{Mutex, MutexGuard};
 
-use crate::{EventKind, HandleHash, gui::{Event, Gui}};
+use crate::{
+    gui::{Event, Gui},
+    EventKind, HandleHash,
+};
 
 pub struct Connection {
     uuid: Uuid,
@@ -31,26 +42,21 @@ impl Connection {
         }
         let server_browser_update = Gui::server_browser_update(self.last_gui.as_ref(), &gui);
         if let Some(to_browser_websocket) = &mut self.to_browser_websocket {
-            let message = serde_json::to_string(&server_browser_update).unwrap(); // TODO: unwrap
+            let message = serde_json::to_string(&server_browser_update).unwrap();
             match to_browser_websocket.write_message(Message::Text(message)) {
                 Ok(()) => {}
                 Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::ConnectionAborted => {
                     // Happens when the page is reloaded
                 }
-                Err(err) => {
-                    panic!(err);
-                }
+                Err(err) => panic!("{}", err),
             }
         } else {
-            // TODO: Error handling
             warn!("Gui ready for sending but no 'to_browser_websocket' found");
         }
         self.last_gui = Some(gui);
     }
 }
 
-// TODO: Should have the type parameter "I: Id" because it doesn't make sense
-// that a connection would be handled with different id types.
 pub struct Connections<'a> {
     r: MutexGuard<'a, Vec<Connection>>,
 }
@@ -70,17 +76,15 @@ pub struct Server {
 }
 
 impl Server {
-    // TODO: IP
     pub fn new<A: ToSocketAddrs + Send + 'static>(address: A) -> Self {
         let connections = Arc::new(Mutex::new(Vec::new()));
         thread::spawn(move || {
-            let listener = TcpListener::bind(address).unwrap(); // TODO: Error handling
+            let listener = TcpListener::bind(address).unwrap();
             for stream in listener.incoming() {
                 match stream {
                     Ok(stream) => handle_incoming_connection(stream),
                     Err(err) => {
                         panic!("Could not retrieve incoming stream of connection: {}", err);
-                        // TODO: Error handling
                     }
                 }
             }
@@ -148,7 +152,7 @@ fn handle_incoming_event(message: &str, connections: Arc<Mutex<Vec<Connection>>>
                 .or_insert(vec![event.kind]);
         }
         Ok(BrowserServerMessage::Welcome { .. }) => {
-            todo!() // TODO: Error handling
+            todo!()
         }
         Err(err) => {
             warn!("Could not deserialize event \"{}\": {}", message, err);
@@ -228,13 +232,11 @@ fn handle_incoming_websocket_connection(
                             handle_welcome_message(websocket, connections, direction, &uuid);
                         }
                         Ok(_other) => todo!(),
-                        Err(err) => {
-                            panic!(err);
-                        }
+                        Err(err) => panic!("{}", err),
                     }
                 }
                 Ok(..) => warn!("Unknown message type from websocket"),
-                Err(err) => panic!(err),
+                Err(err) => panic!("{}", err),
             },
             Err(err) => {
                 error!("{}", err);
@@ -251,14 +253,16 @@ fn handle_incoming_connection(mut stream: TcpStream) {
     info!("Incoming connection from {}", address);
     thread::spawn(move || {
         info!("Created connection thread");
-        let mut buffer = [0; 1024]; // TODO: How to handle this?
+        let mut buffer = [0; 1024];
         match stream.read(&mut buffer) {
             Ok(0) => info!("Zero bytes were read from the stream."),
             Ok(_bytes_read) => {
                 info!("Read bytes on connection {}", address);
                 let uuid_string = format!("\"{}\"", Uuid::new_v4().to_string());
                 //let contents = include_str!("../web/index.html").replace("#uuid", &uuid_string);
-                let contents = std::fs::read_to_string("web/index.html").unwrap().replace("#uuid", &uuid_string);
+                let contents = std::fs::read_to_string("web/index.html")
+                    .unwrap()
+                    .replace("#uuid", &uuid_string);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
                     contents.len(),
@@ -272,7 +276,7 @@ fn handle_incoming_connection(mut stream: TcpStream) {
             Err(err) => panic!(
                 "Could not read from stream of connection {}: {}",
                 address, err
-            ), // TODO: Error handling
+            ),
         }
     });
 }
